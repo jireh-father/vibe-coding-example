@@ -9,15 +9,26 @@ alwaysApply: true
 
 ```
 vibe_coding_tutorial/
-├── src/
-│   ├── api/              # FastAPI 백엔드 서버
-│   │   ├── __init__.py
-│   │   └── main.py
-│   └── agent/            # AI Agent 로직
+├── backend/             # FastAPI 백엔드 서버
+│   ├── __init__.py
+│   ├── main.py          # 애플리케이션 진입점
+│   ├── routers/         # API 라우터
+│   │   └── __init__.py
+│   ├── schemas/         # Pydantic 스키마
+│   │   └── __init__.py
+│   ├── services/        # 비즈니스 로직 서비스
+│   │   └── __init__.py
+│   └── agents/          # AI Agent 로직
 │       ├── __init__.py
-│       └── core.py
-├── frontend/             # Streamlit 프론트엔드
-│   ├── components/       # UI 컴포넌트
+│       ├── agent_template.py   # 에이전트 템플릿
+│       ├── prompts/     # 프롬프트 템플릿
+│       │   └── __init__.py
+│       ├── graphs/      # LangGraph 워크플로우
+│       │   └── __init__.py
+│       └── mcp_adapters/ # MCP 어댑터
+│           └── __init__.py
+├── frontend/            # Streamlit 프론트엔드
+│   ├── components/      # UI 컴포넌트
 │   │   ├── __init__.py
 │   │   ├── chat_interface.py    # 채팅 인터페이스
 │   │   └── product_card.py      # 상품 카드 컴포넌트
@@ -37,9 +48,13 @@ vibe_coding_tutorial/
 │   ├── __init__.py
 │   └── app.py           # 메인 Streamlit 앱
 ├── tests/               # 테스트 코드
-│   ├── test_api/        # API 테스트
-│   ├── test_agent/      # Agent 테스트
-│   └── test_ui/         # UI 테스트
+│   ├── test_backend/    # 백엔드 테스트
+│   │   ├── test_routers/  # 라우터 테스트
+│   │   ├── test_services/ # 서비스 테스트
+│   │   └── test_agents/   # 에이전트 테스트
+│   └── test_frontend/   # 프론트엔드 테스트
+│       ├── test_components/ # 컴포넌트 테스트
+│       └── test_utils/      # 유틸리티 테스트
 ├── .venv/               # 가상환경
 ├── .cursor/rules/       # 개발 가이드라인
 ├── requirements.txt     # 의존성 관리
@@ -66,6 +81,9 @@ vibe_coding_tutorial/
 - 의존성 방향: 외부 → 내부
 - 비즈니스 로직과 프레임워크 분리
 
+### 4. Pylint 사용
+- 필수적인 과정으로 코드 작성 후 pylint 사용해서 리뷰하고 문제있으면 수정해
+
 ## 🔧 코딩 스타일
 
 ### Python 코딩 컨벤션
@@ -86,75 +104,13 @@ vibe_coding_tutorial/
 - **단일 책임**: 각 컴포넌트는 하나의 명확한 역할만 수행
 - **Props 기반 통신**: 컴포넌트 간 데이터 전달은 명시적으로
 
-### 2. 계층별 책임 분리
-```python
-frontend/
-├── app.py              # 앱 진입점 및 전역 설정
-├── pages/              # 페이지 레벨 컴포넌트
-├── components/         # 재사용 가능한 UI 컴포넌트
-├── utils/              # 비즈니스 로직 및 유틸리티
-├── config/             # 설정 및 상수
-└── styles/             # 스타일 정의
-```
-
-### 3. 상태 관리 원칙
+### 2. 상태 관리 원칙
 - **중앙집중식 세션 관리**: `SessionManager` 클래스 활용
 - **불변성 유지**: 상태 변경 시 새로운 객체 생성
 - **명시적 상태 업데이트**: 상태 변경은 명확한 메서드를 통해서만
 
-### 4. API 통신 원칙
+### 3. API 통신 원칙
 - **비동기 처리**: `asyncio`와 `httpx` 활용
 - **에러 핸들링**: 모든 API 호출에 적절한 예외 처리
 - **타임아웃 설정**: 네트워크 요청에 적절한 타임아웃 적용
-
-## 🧪 테스트 전략
-
-### 테스트 레벨
-1. **Unit Test**: 개별 함수/메서드
-2. **Integration Test**: 모듈 간 연동
-3. **E2E Test**: 전체 시스템 테스트
-
-### Frontend 테스트 가이드라인
-- **컴포넌트 테스트**: 각 컴포넌트의 렌더링 및 동작 검증
-- **유틸리티 테스트**: 세션 관리, API 클라이언트 등 로직 검증
-- **Mock 활용**: 외부 의존성은 Mock으로 대체
-
-
-## 🎯 Frontend 컴포넌트 설계 가이드
-
-### 1. 컴포넌트 명명 규칙
-- **클래스명**: PascalCase (예: `ChatInterface`, `ProductCard`)
-- **파일명**: snake_case (예: `chat_interface.py`, `product_card.py`)
-- **메서드명**: snake_case (예: `render_messages`, `handle_user_input`)
-
-### 2. 컴포넌트 구조
-```python
-class ComponentName:
-    """컴포넌트 설명"""
-    
-    def __init__(self, dependencies):
-        """의존성 주입"""
-        pass
-    
-    def render(self):
-        """메인 렌더링 메서드"""
-        pass
-    
-    def _private_method(self):
-        """내부 로직 메서드 (언더스코어 접두사)"""
-        pass
-```
-
-### 3. 설정 관리
-- **중앙집중식 설정**: `config/settings.py`에서 모든 설정 관리
-- **환경별 설정**: 개발/테스트/운영 환경별 설정 분리
-- **타입 안전성**: `@dataclass` 활용으로 타입 안전성 보장
-
-## 환경 변수 관리
-- `.env` 파일 사용
-- 민감한 정보는 환경 변수로 관리
-- `.env.example` 파일로 템플릿 제공
-
-
-
 
