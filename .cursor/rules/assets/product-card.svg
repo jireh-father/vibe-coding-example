@@ -1,0 +1,31 @@
+<svg width="380" height="150" xmlns="http://www.w3.org/2000/svg">
+  <!-- 카드 배경 -->
+  <rect width="380" height="150" fill="#ffffff" rx="12" stroke="#dee2e6" stroke-width="1"/>
+  
+  <!-- 상품 이미지 배경 -->
+  <rect x="15" y="15" width="80" height="80" fill="#f8f9fa" rx="8" stroke="#dee2e6"/>
+  
+  <!-- 액션 버튼 배경들 -->
+  <rect x="110" y="115" width="70" height="25" fill="#007bff" rx="12"/>
+  <rect x="190" y="115" width="70" height="25" fill="#28a745" rx="12"/>
+  <rect x="270" y="115" width="70" height="25" fill="#ffc107" rx="12"/>
+  
+  <!-- 상품 이미지 텍스트 -->
+  <text x="35" y="60" font-family="Arial" font-size="12" fill="#6c757d">상품 이미지</text>
+  
+  <!-- 상품 정보 텍스트 -->
+  <text x="110" y="35" font-family="Arial" font-size="16" font-weight="bold" fill="#212529">iPhone 15 Pro 256GB 블루</text>
+  <text x="110" y="55" font-family="Arial" font-size="14" fill="#6c757d">Apple 공식 제품</text>
+  
+  <!-- 가격 정보 텍스트 -->
+  <text x="110" y="80" font-family="Arial" font-size="20" font-weight="bold" fill="#dc3545">1,350,000원</text>
+  <text x="250" y="80" font-family="Arial" font-size="14" fill="#28a745">쿠팡 (무료배송)</text>
+  
+  <!-- 추가 정보 텍스트 -->
+  <text x="110" y="100" font-family="Arial" font-size="12" fill="#6c757d">⭐ 4.8 (리뷰 1,234개) | 당일배송 가능</text>
+  
+  <!-- 액션 버튼 텍스트들 -->
+  <text x="130" y="130" font-family="Arial" font-size="11" fill="white">상세보기</text>
+  <text x="210" y="130" font-family="Arial" font-size="11" fill="white">구매하기</text>
+  <text x="290" y="130" font-family="Arial" font-size="11" fill="white">알림설정</text>
+</svg> 

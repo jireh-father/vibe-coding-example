@@ -1,0 +1,42 @@
+<svg width="380" height="200" xmlns="http://www.w3.org/2000/svg">
+  <!-- 테이블 배경 -->
+  <rect width="380" height="200" fill="#ffffff" rx="8" stroke="#dee2e6"/>
+  
+  <!-- 헤더 배경 -->
+  <rect x="0" y="0" width="380" height="40" fill="#f8f9fa" rx="8"/>
+  
+  <!-- 최저가 하이라이트 배경 -->
+  <rect x="10" y="75" width="360" height="20" fill="#d4edda" opacity="0.5" rx="4"/>
+  
+  <!-- 구분선 -->
+  <line x1="10" y1="70" x2="370" y2="70" stroke="#dee2e6"/>
+  
+  <!-- 헤더 텍스트 -->
+  <text x="20" y="25" font-family="Arial" font-size="14" font-weight="bold" fill="#495057">가격 비교 상세</text>
+  
+  <!-- 테이블 헤더 텍스트 -->
+  <text x="20" y="60" font-family="Arial" font-size="12" font-weight="bold" fill="#495057">쇼핑몰</text>
+  <text x="120" y="60" font-family="Arial" font-size="12" font-weight="bold" fill="#495057">판매가</text>
+  <text x="200" y="60" font-family="Arial" font-size="12" font-weight="bold" fill="#495057">할인/쿠폰</text>
+  <text x="280" y="60" font-family="Arial" font-size="12" font-weight="bold" fill="#495057">최종가격</text>
+  
+  <!-- 데이터 행 텍스트들 -->
+  <text x="20" y="90" font-family="Arial" font-size="12" fill="#495057">쿠팡</text>
+  <text x="120" y="90" font-family="Arial" font-size="12" fill="#495057">1,399,000</text>
+  <text x="200" y="90" font-family="Arial" font-size="12" fill="#dc3545">-49,000</text>
+  <text x="280" y="90" font-family="Arial" font-size="12" font-weight="bold" fill="#28a745">1,350,000</text>
+  
+  <text x="20" y="110" font-family="Arial" font-size="12" fill="#495057">11번가</text>
+  <text x="120" y="110" font-family="Arial" font-size="12" fill="#495057">1,389,000</text>
+  <text x="200" y="110" font-family="Arial" font-size="12" fill="#dc3545">-30,000</text>
+  <text x="280" y="110" font-family="Arial" font-size="12" fill="#495057">1,359,000</text>
+  
+  <text x="20" y="130" font-family="Arial" font-size="12" fill="#495057">G마켓</text>
+  <text x="120" y="130" font-family="Arial" font-size="12" fill="#495057">1,399,000</text>
+  <text x="200" y="130" font-family="Arial" font-size="12" fill="#dc3545">-20,000</text>
+  <text x="280" y="130" font-family="Arial" font-size="12" fill="#495057">1,379,000</text>
+  
+  <!-- 배송 정보 텍스트 -->
+  <text x="20" y="160" font-family="Arial" font-size="11" fill="#6c757d">🚚 무료배송 | 📦 당일배송 가능</text>
+  <text x="20" y="180" font-family="Arial" font-size="11" fill="#6c757d">💳 카드할인 추가 2% | 🎁 적립금 13,500원</text>
+</svg> 

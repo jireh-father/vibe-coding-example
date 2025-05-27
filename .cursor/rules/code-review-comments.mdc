@@ -1,0 +1,154 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# 코드 리뷰 코멘트 가이드라인
+
+## 📝 효과적인 코드 리뷰 코멘트 작성법
+
+### 1. 코멘트 구조화
+```
+[우선순위]: 문제/이슈 설명
+- 근거 또는 이유
+- 개선 제안
+```
+
+**우선순위 표시:**
+- `[필수]`: 반드시 수정해야 하는 중요 사항
+- `[권장]`: 권장되는 개선 사항이지만 선택적
+- `[질문]`: 명확히 하기 위한 질문
+- `[칭찬]`: 좋은 코드나 접근 방식에 대한 칭찬
+
+### 2. 구체적인 피드백 제공
+
+#### ❌ 비효과적인 코멘트
+```
+이 함수가 너무 길어요.
+```
+
+#### ✅ 효과적인 코멘트
+```
+[권장]: 이 함수는 현재 60줄로 단일 책임 원칙을 위반하고 있습니다.
+- 여러 다른 책임(데이터 검증, 변환, 저장)을 모두 포함하고 있어 가독성과 유지보수성이 저하됩니다.
+- 다음과 같이 작은 함수로 분리하는 것을 제안합니다:
+  1. `validate_input()`: 입력 데이터 검증
+  2. `transform_data()`: 데이터 변환
+  3. `save_to_database()`: 데이터 저장
+```
+
+### 3. 코드 샘플 제공
+```
+[권장]: 이 반복문은 리스트 컴프리헨션으로 단순화할 수 있습니다.
+
+현재 코드:
+```python
+result = []
+for item in items:
+    if item.is_valid():
+        result.append(item.transform())
+```
+
+개선 제안:
+```python
+result = [item.transform() for item in items if item.is_valid()]
+```
+```
+
+### 4. 질문 방식으로 접근
+
+#### ❌ 명령형 접근
+```
+이 함수명을 더 명확하게 바꾸세요.
+```
+
+#### ✅ 질문형 접근
+```
+[질문]: 이 함수가 정확히 어떤 작업을 수행하는지 함수명에서 명확히 알 수 있을까요? 
+- `process_data()`보다 `validate_and_transform_user_input()`과 같이 구체적인 이름이 더 명확하지 않을까요?
+```
+
+## 💬 코드 리뷰 시나리오별 코멘트 예시
+
+### 1. 성능 이슈
+```
+[권장]: 이 데이터 처리 루프는 시간 복잡도가 O(n²)입니다.
+- 대용량 데이터셋에서 성능 병목이 될 수 있습니다.
+- 해시맵(딕셔너리)을 사용하여 O(n)으로 개선할 수 있습니다:
+```python
+# 개선된 코드 예시
+seen = {}
+for item in items:
+    seen[item.id] = item
+```
+
+### 2. 보안 이슈
+```
+[필수]: 이 SQL 쿼리 문자열 연결은 SQL 인젝션 취약점이 있습니다.
+- 사용자 입력이 직접 쿼리에 연결되고 있습니다.
+- 매개변수화된 쿼리를 사용하여 수정해야 합니다:
+```python
+# 수정 전
+query = f"SELECT * FROM users WHERE username = '{username}'"
+
+# 수정 후
+query = "SELECT * FROM users WHERE username = %s"
+cursor.execute(query, (username,))
+```
+```
+
+### 3. 코드 중복
+```
+[필수]: 이 검증 로직이 user_service.py와 auth_service.py에 중복되어 있습니다.
+- 중복 코드는 유지보수 시 버그 발생 가능성을 높입니다.
+- 공통 유틸리티 함수로 분리하여 재사용하는 것을 제안합니다:
+```python
+# utils/validators.py에 공통 함수 생성
+def validate_user_credentials(username, password):
+    # 검증 로직
+    pass
+```
+```
+
+### 4. 가독성 개선
+```
+[권장]: 이 복잡한 조건문은 가독성이 떨어집니다.
+- 여러 조건이 중첩되어 이해하기 어렵습니다.
+- 다음과 같이 명확한 함수로 추출하는 것을 제안합니다:
+```python
+# 수정 전
+if user and user.is_active and (user.role == 'admin' or (user.role == 'editor' and user.department == 'marketing')):
+    # 로직...
+
+# 수정 후
+def has_access_permission(user):
+    if not user or not user.is_active:
+        return False
+    
+    is_admin = user.role == 'admin'
+    is_marketing_editor = user.role == 'editor' and user.department == 'marketing'
+    
+    return is_admin or is_marketing_editor
+
+if has_access_permission(user):
+    # 로직...
+```
+```
+
+## 🌟 코드 리뷰 코멘트 예절
+
+### 1. 코드와 작성자 분리하기
+- 코드에 대해 논의하고, 작성자를 비판하지 않기
+- "이 코드는..." vs "당신은..."
+
+### 2. 긍정적인 피드백 포함하기
+- 개선이 필요한 부분만 지적하지 말고, 잘 작성된 부분도 언급하기
+- 모든 PR에서 최소 하나 이상의 긍정적 코멘트 남기기
+
+### 3. 감사 표현하기
+- 좋은 PR 또는 개선 사항에 대해 감사 표현하기
+- 리뷰어의 노력과 기여 인정하기
+
+### 4. 토론 환영하기
+- 의견 차이가 있을 때 열린 토론 환영하기
+- "이게 더 좋을 것 같아요"보다 "이 방식이 더 좋을 수 있는 이유는..."

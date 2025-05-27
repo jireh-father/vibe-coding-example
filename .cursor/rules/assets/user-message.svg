@@ -1,0 +1,10 @@
+<svg width="400" height="50" xmlns="http://www.w3.org/2000/svg">
+  <!-- 메시지 배경 -->
+  <rect x="80" y="10" width="300" height="30" fill="#007bff" rx="15"/>
+  
+  <!-- 메시지 텍스트 -->
+  <text x="100" y="30" font-family="Arial" font-size="14" fill="white">아이폰 15 프로 256GB 최저가 찾아줘</text>
+  
+  <!-- 시간 텍스트 -->
+  <text x="350" y="45" font-family="Arial" font-size="10" fill="#6c757d">오후 2:30</text>
+</svg> 

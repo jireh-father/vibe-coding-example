@@ -1,0 +1,86 @@
+---
+description: Tech Stakc & System Architecture
+globs: 
+alwaysApply: false
+---
+# 최저가 쇼핑 Agent - 기술 아키텍처 설계
+
+## 📋 기술 스택 개요
+
+이 문서는 최저가 쇼핑 Agent의 기술적 구현을 위한 아키텍처와 기술 스택을 정의합니다.
+
+## 🛠️ 기술 스택 (Tech Stack)
+
+### 핵심 언어
+- **Python 3.11** - 메인 개발 언어
+
+### 백엔드 (Backend)
+- **FastAPI** - REST API 서버
+
+### 프론트엔드 (Frontend)
+- **Streamlit** - 웹 인터페이스
+
+### AI Agent 관련 프레임워크
+- **LangGraph** - Agent 워크플로우 관리
+- **Google Gemini 2.5 Flash** - LLM
+- **MCP (Model Context Protocol)** - Agent의 Tool로 활용
+
+## 🏗️ 시스템 아키텍처
+
+### 전체 시스템 아키텍처
+
+```mermaid
+graph TB
+    subgraph "Frontend Layer"
+        subgraph "Streamlit UI"
+            Chat[Chat Interface]    
+        end
+    end
+    
+    subgraph "API Gateway"
+        FastAPI[FastAPI Server]
+    end
+    
+    subgraph "AI Agent Layer"
+        LG[LangGraph Agent]
+        Gemini[Gemini 2.5 Flash]
+        Tools[MCP Tools]
+    end
+    
+    subgraph "Business Logic"
+        Search[Product Search]
+        Compare[Price Comparison]
+    end
+    
+    subgraph "Internet"
+        Shop1[쿠팡]
+        Shop2[11번가]
+        Shop3[G마켓]
+        Shop4[옥션]
+        Shop5[네이버쇼핑]
+        Shop6[etc]
+    end
+    
+    Chat --> FastAPI
+    
+    FastAPI --> LG
+    
+    LG --> Gemini
+    LG --> Tools
+    LG --> Search
+    
+    Search --> Compare
+    Tools --> Crawler
+    Compare --> LG
+    
+    Crawler --> Shop1
+    Crawler --> Shop2
+    Crawler --> Shop3
+    Crawler --> Shop4
+    Crawler --> Shop5
+    Crawler --> Shop6
+    Crawler --> LG
+
+    LG --> Chat
+
+```

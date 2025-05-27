@@ -1,0 +1,65 @@
+<svg width="400" height="600" xmlns="http://www.w3.org/2000/svg">
+  <!-- 배경 -->
+  <rect width="400" height="600" fill="#f8f9fa" stroke="#e9ecef" stroke-width="2"/>
+  
+  <!-- 헤더 영역 배경 -->
+  <rect x="0" y="0" width="400" height="60" fill="#ffffff" stroke="#dee2e6"/>
+  
+  <!-- 채팅 영역 배경 -->
+  <rect x="10" y="70" width="380" height="460" fill="#ffffff" rx="8" stroke="#dee2e6"/>
+  
+  <!-- 사용자 메시지 배경 -->
+  <rect x="100" y="110" width="280" height="40" fill="#007bff" rx="20"/>
+  
+  <!-- 봇 메시지 배경 -->
+  <rect x="20" y="160" width="300" height="60" fill="#e9ecef" rx="20"/>
+  
+  <!-- 상품 카드 배경 -->
+  <rect x="20" y="230" width="360" height="120" fill="#ffffff" rx="8" stroke="#dee2e6"/>
+  <rect x="30" y="240" width="60" height="60" fill="#f8f9fa" rx="4"/>
+  
+  <!-- 버튼 배경들 -->
+  <rect x="100" y="315" width="80" height="25" fill="#007bff" rx="12"/>
+  <rect x="190" y="315" width="80" height="25" fill="#28a745" rx="12"/>
+  <rect x="280" y="315" width="80" height="25" fill="#ffc107" rx="12"/>
+  
+  <!-- 입력 영역 배경 -->
+  <rect x="10" y="540" width="380" height="50" fill="#ffffff" rx="25" stroke="#dee2e6"/>
+  
+  <!-- 입력 영역 버튼들 -->
+  <circle cx="320" cy="565" r="15" fill="#007bff"/>
+  <circle cx="350" cy="565" r="15" fill="#28a745"/>
+  <circle cx="370" cy="565" r="8" fill="#dc3545"/>
+  
+  <!-- 헤더 텍스트 -->
+  <text x="20" y="35" font-family="Arial" font-size="18" font-weight="bold" fill="#495057">PriceFinder</text>
+  <circle cx="360" cy="30" r="15" fill="#6c757d"/>
+  <text x="355" y="35" font-family="Arial" font-size="12" fill="white">⚙</text>
+  
+  <!-- 채팅 영역 텍스트 -->
+  <text x="20" y="95" font-family="Arial" font-size="12" fill="#6c757d">채팅 메시지 영역</text>
+  
+  <!-- 사용자 메시지 텍스트 -->
+  <text x="120" y="135" font-family="Arial" font-size="14" fill="white">아이폰 15 프로 최저가 찾아줘</text>
+  
+  <!-- 봇 메시지 텍스트 -->
+  <text x="40" y="185" font-family="Arial" font-size="14" fill="#495057">아이폰 15 Pro를 검색하고 있습니다...</text>
+  <text x="40" y="205" font-family="Arial" font-size="12" fill="#6c757d">🔍 5개 쇼핑몰에서 가격 비교 중</text>
+  
+  <!-- 상품 카드 텍스트 -->
+  <text x="35" y="275" font-family="Arial" font-size="10" fill="#6c757d">상품이미지</text>
+  <text x="100" y="255" font-family="Arial" font-size="14" font-weight="bold" fill="#212529">iPhone 15 Pro 256GB</text>
+  <text x="100" y="275" font-family="Arial" font-size="16" font-weight="bold" fill="#dc3545">최저가: 1,350,000원</text>
+  <text x="100" y="295" font-family="Arial" font-size="12" fill="#28a745">쿠팡 (무료배송)</text>
+  
+  <!-- 버튼 텍스트 -->
+  <text x="125" y="330" font-family="Arial" font-size="11" fill="white">상세보기</text>
+  <text x="215" y="330" font-family="Arial" font-size="11" fill="white">구매하기</text>
+  <text x="305" y="330" font-family="Arial" font-size="11" fill="white">알림설정</text>
+  
+  <!-- 입력 영역 텍스트 -->
+  <text x="25" y="570" font-family="Arial" font-size="14" fill="#6c757d">메시지를 입력하세요...</text>
+  <text x="315" y="570" font-family="Arial" font-size="12" fill="white">🎤</text>
+  <text x="345" y="570" font-family="Arial" font-size="12" fill="white">📷</text>
+  <text x="367" y="569" font-family="Arial" font-size="10" fill="white">→</text>
+</svg> 

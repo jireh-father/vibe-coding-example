@@ -1,0 +1,17 @@
+<svg width="400" height="80" xmlns="http://www.w3.org/2000/svg">
+  <!-- 봇 아바타 배경 -->
+  <circle cx="25" cy="25" r="15" fill="#28a745"/>
+  
+  <!-- 메시지 배경 -->
+  <rect x="50" y="10" width="320" height="50" fill="#e9ecef" rx="15"/>
+  
+  <!-- 봇 아바타 텍스트 -->
+  <text x="20" y="30" font-family="Arial" font-size="12" fill="white">🤖</text>
+  
+  <!-- 메시지 텍스트 -->
+  <text x="70" y="30" font-family="Arial" font-size="14" fill="#495057">아이폰 15 Pro 256GB를 검색하고 있습니다...</text>
+  <text x="70" y="45" font-family="Arial" font-size="12" fill="#6c757d">🔍 5개 쇼핑몰에서 가격 비교 중</text>
+  
+  <!-- 시간 텍스트 -->
+  <text x="60" y="75" font-family="Arial" font-size="10" fill="#6c757d">오후 2:31</text>
+</svg> 

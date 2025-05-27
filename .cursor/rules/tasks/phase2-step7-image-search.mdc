@@ -1,0 +1,1280 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# 7단계: 이미지 검색 기능 구현
+
+## 🎯 목표
+이미지 기반 상품 검색 시스템 구축 - Google Vision API 연동, 이미지 분석, 상품 식별, 유사 상품 검색
+
+## 📋 상세 태스크
+
+### 7.1 Google Vision API 연동
+
+#### 환경 설정 업데이트
+```env
+# Google Vision API
+GOOGLE_VISION_API_KEY=your_vision_api_key_here
+GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account-key.json
+
+# Image Processing
+MAX_IMAGE_SIZE=10485760  # 10MB
+SUPPORTED_IMAGE_FORMATS=jpg,jpeg,png,webp
+IMAGE_ANALYSIS_TIMEOUT=30
+
+# Vision API Settings
+VISION_MAX_RESULTS=10
+VISION_CONFIDENCE_THRESHOLD=0.7
+```
+
+#### requirements.txt 업데이트
+```txt
+# 기존 의존성...
+
+# Google Vision API
+google-cloud-vision==3.4.5
+google-auth==2.23.4
+
+# Image Processing
+Pillow==10.1.0
+opencv-python==4.8.1.78
+numpy==1.24.3
+
+# OCR and Text Processing
+pytesseract==0.3.10
+easyocr==1.7.0
+
+# Additional utilities
+requests==2.31.0
+aiofiles==23.2.1
+```
+
+### 7.2 이미지 분석 서비스
+
+#### 이미지 분석 서비스 (`src/agent/services/image_analysis.py`)
+```python
+import os
+import io
+import base64
+import asyncio
+from typing import Dict, Any, List, Optional, Tuple
+from PIL import Image
+import cv2
+import numpy as np
+from google.cloud import vision
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ImageAnalysisService:
+    """이미지 분석 서비스 클래스"""
+    
+    def __init__(self):
+        self.vision_client = self._initialize_vision_client()
+        self.max_image_size = int(os.getenv("MAX_IMAGE_SIZE", "10485760"))
+        self.supported_formats = os.getenv("SUPPORTED_IMAGE_FORMATS", "jpg,jpeg,png,webp").split(",")
+        self.confidence_threshold = float(os.getenv("VISION_CONFIDENCE_THRESHOLD", "0.7"))
+    
+    def _initialize_vision_client(self):
+        """Google Vision API 클라이언트 초기화"""
+        try:
+            # 서비스 계정 키 파일 경로 설정
+            credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            if credentials_path and os.path.exists(credentials_path):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+            
+            return vision.ImageAnnotatorClient()
+        except Exception as e:
+            logger.error(f"Vision API 클라이언트 초기화 실패: {str(e)}")
+            return None
+    
+    async def analyze_product_image(self, image_data: bytes) -> Dict[str, Any]:
+        """상품 이미지 종합 분석"""
+        try:
+            # 이미지 전처리
+            processed_image = await self._preprocess_image(image_data)
+            
+            # 병렬로 여러 분석 수행
+            tasks = [
+                self._detect_objects(processed_image),
+                self._detect_text(processed_image),
+                self._detect_labels(processed_image),
+                self._analyze_product_attributes(processed_image)
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 결과 통합
+            analysis_result = {
+                "objects": results[0] if not isinstance(results[0], Exception) else [],
+                "text": results[1] if not isinstance(results[1], Exception) else [],
+                "labels": results[2] if not isinstance(results[2], Exception) else [],
+                "attributes": results[3] if not isinstance(results[3], Exception) else {},
+                "product_info": {}
+            }
+            
+            # 상품 정보 추출
+            product_info = await self._extract_product_info(analysis_result)
+            analysis_result["product_info"] = product_info
+            
+            return {
+                "success": True,
+                "analysis": analysis_result,
+                "confidence": self._calculate_overall_confidence(analysis_result)
+            }
+            
+        except Exception as e:
+            logger.error(f"이미지 분석 실패: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "analysis": {}
+            }
+    
+    async def _preprocess_image(self, image_data: bytes) -> bytes:
+        """이미지 전처리"""
+        try:
+            # PIL로 이미지 로드
+            image = Image.open(io.BytesIO(image_data))
+            
+            # 이미지 크기 조정 (Vision API 최적화)
+            max_dimension = 1024
+            if max(image.size) > max_dimension:
+                ratio = max_dimension / max(image.size)
+                new_size = tuple(int(dim * ratio) for dim in image.size)
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # RGB 변환 (필요한 경우)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # 이미지 품질 향상
+            image_array = np.array(image)
+            enhanced_image = self._enhance_image_quality(image_array)
+            
+            # 바이트로 변환
+            enhanced_pil = Image.fromarray(enhanced_image)
+            output_buffer = io.BytesIO()
+            enhanced_pil.save(output_buffer, format='JPEG', quality=95)
+            
+            return output_buffer.getvalue()
+            
+        except Exception as e:
+            logger.error(f"이미지 전처리 실패: {str(e)}")
+            return image_data  # 원본 반환
+    
+    def _enhance_image_quality(self, image_array: np.ndarray) -> np.ndarray:
+        """이미지 품질 향상"""
+        try:
+            # 노이즈 제거
+            denoised = cv2.bilateralFilter(image_array, 9, 75, 75)
+            
+            # 선명도 향상
+            kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+            sharpened = cv2.filter2D(denoised, -1, kernel)
+            
+            # 대비 향상
+            lab = cv2.cvtColor(sharpened, cv2.COLOR_RGB2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            l = clahe.apply(l)
+            enhanced = cv2.merge([l, a, b])
+            enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2RGB)
+            
+            return enhanced
+            
+        except Exception as e:
+            logger.error(f"이미지 품질 향상 실패: {str(e)}")
+            return image_array
+    
+    async def _detect_objects(self, image_data: bytes) -> List[Dict[str, Any]]:
+        """객체 감지"""
+        if not self.vision_client:
+            return []
+        
+        try:
+            image = vision.Image(content=image_data)
+            response = self.vision_client.object_localization(image=image)
+            
+            objects = []
+            for obj in response.localized_object_annotations:
+                if obj.score >= self.confidence_threshold:
+                    objects.append({
+                        "name": obj.name,
+                        "confidence": obj.score,
+                        "bounding_box": {
+                            "vertices": [
+                                {"x": vertex.x, "y": vertex.y} 
+                                for vertex in obj.bounding_poly.normalized_vertices
+                            ]
+                        }
+                    })
+            
+            return objects
+            
+        except Exception as e:
+            logger.error(f"객체 감지 실패: {str(e)}")
+            return []
+    
+    async def _detect_text(self, image_data: bytes) -> List[Dict[str, Any]]:
+        """텍스트 감지 및 OCR"""
+        if not self.vision_client:
+            return []
+        
+        try:
+            image = vision.Image(content=image_data)
+            response = self.vision_client.text_detection(image=image)
+            
+            texts = []
+            for text in response.text_annotations:
+                if text.description and len(text.description.strip()) > 1:
+                    texts.append({
+                        "text": text.description.strip(),
+                        "confidence": getattr(text, 'confidence', 0.9),
+                        "bounding_box": {
+                            "vertices": [
+                                {"x": vertex.x, "y": vertex.y} 
+                                for vertex in text.bounding_poly.vertices
+                            ]
+                        }
+                    })
+            
+            return texts
+            
+        except Exception as e:
+            logger.error(f"텍스트 감지 실패: {str(e)}")
+            return []
+    
+    async def _detect_labels(self, image_data: bytes) -> List[Dict[str, Any]]:
+        """라벨 감지"""
+        if not self.vision_client:
+            return []
+        
+        try:
+            image = vision.Image(content=image_data)
+            response = self.vision_client.label_detection(image=image)
+            
+            labels = []
+            for label in response.label_annotations:
+                if label.score >= self.confidence_threshold:
+                    labels.append({
+                        "description": label.description,
+                        "confidence": label.score,
+                        "topicality": getattr(label, 'topicality', 0.0)
+                    })
+            
+            return labels
+            
+        except Exception as e:
+            logger.error(f"라벨 감지 실패: {str(e)}")
+            return []
+    
+    async def _analyze_product_attributes(self, image_data: bytes) -> Dict[str, Any]:
+        """상품 속성 분석"""
+        try:
+            # 색상 분석
+            colors = await self._analyze_colors(image_data)
+            
+            # 브랜드 로고 감지
+            logos = await self._detect_logos(image_data)
+            
+            # 상품 카테고리 추정
+            category = await self._estimate_category(image_data)
+            
+            return {
+                "colors": colors,
+                "logos": logos,
+                "estimated_category": category
+            }
+            
+        except Exception as e:
+            logger.error(f"상품 속성 분석 실패: {str(e)}")
+            return {}
+    
+    async def _analyze_colors(self, image_data: bytes) -> List[Dict[str, Any]]:
+        """색상 분석"""
+        try:
+            image = Image.open(io.BytesIO(image_data))
+            image_array = np.array(image)
+            
+            # 주요 색상 추출 (K-means 클러스터링)
+            pixels = image_array.reshape(-1, 3)
+            
+            # 샘플링으로 성능 최적화
+            if len(pixels) > 10000:
+                indices = np.random.choice(len(pixels), 10000, replace=False)
+                pixels = pixels[indices]
+            
+            from sklearn.cluster import KMeans
+            kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
+            kmeans.fit(pixels)
+            
+            colors = []
+            for i, color in enumerate(kmeans.cluster_centers_):
+                colors.append({
+                    "rgb": [int(c) for c in color],
+                    "hex": "#{:02x}{:02x}{:02x}".format(int(color[0]), int(color[1]), int(color[2])),
+                    "percentage": float(np.sum(kmeans.labels_ == i) / len(kmeans.labels_))
+                })
+            
+            # 비율 순으로 정렬
+            colors.sort(key=lambda x: x["percentage"], reverse=True)
+            return colors
+            
+        except Exception as e:
+            logger.error(f"색상 분석 실패: {str(e)}")
+            return []
+    
+    async def _detect_logos(self, image_data: bytes) -> List[Dict[str, Any]]:
+        """로고 감지"""
+        if not self.vision_client:
+            return []
+        
+        try:
+            image = vision.Image(content=image_data)
+            response = self.vision_client.logo_detection(image=image)
+            
+            logos = []
+            for logo in response.logo_annotations:
+                if logo.score >= self.confidence_threshold:
+                    logos.append({
+                        "description": logo.description,
+                        "confidence": logo.score,
+                        "bounding_box": {
+                            "vertices": [
+                                {"x": vertex.x, "y": vertex.y} 
+                                for vertex in logo.bounding_poly.vertices
+                            ]
+                        }
+                    })
+            
+            return logos
+            
+        except Exception as e:
+            logger.error(f"로고 감지 실패: {str(e)}")
+            return []
+    
+    async def _estimate_category(self, image_data: bytes) -> Dict[str, Any]:
+        """상품 카테고리 추정"""
+        try:
+            # 간단한 카테고리 매핑 (실제로는 더 정교한 ML 모델 사용)
+            category_keywords = {
+                "electronics": ["phone", "laptop", "computer", "tablet", "camera", "headphone"],
+                "clothing": ["shirt", "dress", "pants", "shoes", "jacket", "hat"],
+                "home": ["furniture", "lamp", "chair", "table", "bed", "sofa"],
+                "beauty": ["cosmetics", "perfume", "makeup", "skincare"],
+                "sports": ["ball", "equipment", "fitness", "sports"],
+                "books": ["book", "magazine", "novel"],
+                "toys": ["toy", "game", "doll", "puzzle"]
+            }
+            
+            # 라벨 기반 카테고리 추정 (실제 구현에서는 더 정교한 로직 필요)
+            return {
+                "category": "general",
+                "confidence": 0.5,
+                "subcategories": []
+            }
+            
+        except Exception as e:
+            logger.error(f"카테고리 추정 실패: {str(e)}")
+            return {}
+    
+    async def _extract_product_info(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+        """분석 결과에서 상품 정보 추출"""
+        try:
+            product_info = {
+                "name": "",
+                "brand": "",
+                "model": "",
+                "category": "",
+                "keywords": [],
+                "confidence": 0.0
+            }
+            
+            # 텍스트에서 상품명/브랜드 추출
+            texts = analysis_result.get("text", [])
+            if texts:
+                # 가장 큰 텍스트를 상품명으로 추정
+                main_text = max(texts, key=lambda x: len(x.get("text", "")))
+                product_info["name"] = main_text.get("text", "")
+            
+            # 로고에서 브랜드 추출
+            logos = analysis_result.get("attributes", {}).get("logos", [])
+            if logos:
+                product_info["brand"] = logos[0].get("description", "")
+            
+            # 라벨에서 키워드 추출
+            labels = analysis_result.get("labels", [])
+            product_info["keywords"] = [
+                label.get("description", "") 
+                for label in labels[:5]  # 상위 5개만
+            ]
+            
+            # 카테고리 설정
+            category_info = analysis_result.get("attributes", {}).get("estimated_category", {})
+            product_info["category"] = category_info.get("category", "general")
+            
+            # 전체 신뢰도 계산
+            product_info["confidence"] = self._calculate_overall_confidence(analysis_result)
+            
+            return product_info
+            
+        except Exception as e:
+            logger.error(f"상품 정보 추출 실패: {str(e)}")
+            return {}
+    
+    def _calculate_overall_confidence(self, analysis_result: Dict[str, Any]) -> float:
+        """전체 신뢰도 계산"""
+        try:
+            confidences = []
+            
+            # 객체 감지 신뢰도
+            objects = analysis_result.get("objects", [])
+            if objects:
+                obj_confidence = sum(obj.get("confidence", 0) for obj in objects) / len(objects)
+                confidences.append(obj_confidence)
+            
+            # 라벨 감지 신뢰도
+            labels = analysis_result.get("labels", [])
+            if labels:
+                label_confidence = sum(label.get("confidence", 0) for label in labels) / len(labels)
+                confidences.append(label_confidence)
+            
+            # 로고 감지 신뢰도
+            logos = analysis_result.get("attributes", {}).get("logos", [])
+            if logos:
+                logo_confidence = sum(logo.get("confidence", 0) for logo in logos) / len(logos)
+                confidences.append(logo_confidence)
+            
+            return sum(confidences) / len(confidences) if confidences else 0.0
+            
+        except Exception as e:
+            logger.error(f"신뢰도 계산 실패: {str(e)}")
+            return 0.0
+```
+
+### 7.3 이미지 검색 도구
+
+#### 이미지 검색 도구 (`src/agent/tools/image_search_tools.py`)
+```python
+from langchain.tools import BaseTool
+from typing import Dict, Any, List, Optional
+import asyncio
+from pydantic import BaseModel, Field
+
+from ..services.image_analysis import ImageAnalysisService
+from .shopping_crawlers import MultiShoppingCrawler
+
+class ImageSearchInput(BaseModel):
+    """이미지 검색 입력 모델"""
+    image_data: bytes = Field(description="이미지 데이터")
+    additional_context: Optional[str] = Field(default="", description="추가 컨텍스트")
+
+class ImageProductSearchTool(BaseTool):
+    """이미지 기반 상품 검색 도구"""
+    name = "image_product_search"
+    description = "이미지를 분석하여 유사한 상품을 검색합니다."
+    args_schema = ImageSearchInput
+    
+    def __init__(self):
+        super().__init__()
+        self.image_analyzer = ImageAnalysisService()
+        self.shopping_crawler = MultiShoppingCrawler()
+    
+    def _run(self, image_data: bytes, additional_context: str = "") -> Dict[str, Any]:
+        """동기 실행"""
+        return asyncio.run(self._arun(image_data, additional_context))
+    
+    async def _arun(self, image_data: bytes, additional_context: str = "") -> Dict[str, Any]:
+        """비동기 이미지 검색 실행"""
+        try:
+            # 1단계: 이미지 분석
+            analysis_result = await self.image_analyzer.analyze_product_image(image_data)
+            
+            if not analysis_result["success"]:
+                return {
+                    "success": False,
+                    "error": "이미지 분석에 실패했습니다.",
+                    "details": analysis_result.get("error", "")
+                }
+            
+            # 2단계: 검색 쿼리 생성
+            search_query = await self._generate_search_query(
+                analysis_result["analysis"], 
+                additional_context
+            )
+            
+            # 3단계: 상품 검색
+            search_results = await self.shopping_crawler._arun(search_query, max_results=10)
+            
+            # 4단계: 결과 필터링 및 랭킹
+            filtered_results = await self._filter_and_rank_results(
+                search_results.get("products", []),
+                analysis_result["analysis"]
+            )
+            
+            return {
+                "success": True,
+                "image_analysis": analysis_result["analysis"],
+                "search_query": search_query,
+                "products": filtered_results,
+                "total_found": len(filtered_results),
+                "confidence": analysis_result.get("confidence", 0.0)
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "image_analysis": {},
+                "products": []
+            }
+    
+    async def _generate_search_query(
+        self, 
+        analysis: Dict[str, Any], 
+        additional_context: str
+    ) -> str:
+        """분석 결과를 바탕으로 검색 쿼리 생성"""
+        try:
+            query_parts = []
+            
+            # 상품 정보에서 쿼리 생성
+            product_info = analysis.get("product_info", {})
+            
+            # 브랜드 추가
+            brand = product_info.get("brand", "")
+            if brand:
+                query_parts.append(brand)
+            
+            # 상품명 추가 (정제)
+            name = product_info.get("name", "")
+            if name:
+                # 상품명에서 불필요한 단어 제거
+                cleaned_name = self._clean_product_name(name)
+                if cleaned_name:
+                    query_parts.append(cleaned_name)
+            
+            # 키워드 추가
+            keywords = product_info.get("keywords", [])
+            relevant_keywords = [kw for kw in keywords[:3] if self._is_relevant_keyword(kw)]
+            query_parts.extend(relevant_keywords)
+            
+            # 추가 컨텍스트 추가
+            if additional_context:
+                query_parts.append(additional_context)
+            
+            # 쿼리 조합
+            search_query = " ".join(query_parts)
+            
+            # 기본 쿼리가 없는 경우 라벨 기반 생성
+            if not search_query.strip():
+                labels = analysis.get("labels", [])
+                if labels:
+                    search_query = labels[0].get("description", "상품")
+            
+            return search_query.strip() or "상품"
+            
+        except Exception as e:
+            return "상품"
+    
+    def _clean_product_name(self, name: str) -> str:
+        """상품명 정제"""
+        try:
+            # 불필요한 문자 제거
+            import re
+            
+            # 특수문자 제거
+            cleaned = re.sub(r'[^\w\s가-힣]', ' ', name)
+            
+            # 불필요한 단어 제거
+            stop_words = ['new', 'original', 'genuine', 'authentic', 'sale', 'discount']
+            words = cleaned.split()
+            filtered_words = [word for word in words if word.lower() not in stop_words]
+            
+            return " ".join(filtered_words[:5])  # 최대 5단어
+            
+        except Exception:
+            return name
+    
+    def _is_relevant_keyword(self, keyword: str) -> bool:
+        """키워드 관련성 확인"""
+        # 상품과 관련 없는 일반적인 키워드 필터링
+        irrelevant_keywords = [
+            'product', 'item', 'thing', 'object', 'material', 'design',
+            'color', 'white', 'black', 'red', 'blue', 'green'
+        ]
+        return keyword.lower() not in irrelevant_keywords and len(keyword) > 2
+    
+    async def _filter_and_rank_results(
+        self, 
+        products: List[Dict[str, Any]], 
+        analysis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """검색 결과 필터링 및 랭킹"""
+        try:
+            if not products:
+                return []
+            
+            # 각 상품에 대해 유사도 점수 계산
+            scored_products = []
+            for product in products:
+                similarity_score = await self._calculate_similarity_score(product, analysis)
+                product_with_score = product.copy()
+                product_with_score["similarity_score"] = similarity_score
+                scored_products.append(product_with_score)
+            
+            # 유사도 점수로 정렬
+            scored_products.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
+            
+            # 상위 결과만 반환
+            return scored_products[:8]
+            
+        except Exception as e:
+            return products[:8]  # 에러 시 원본 결과 반환
+    
+    async def _calculate_similarity_score(
+        self, 
+        product: Dict[str, Any], 
+        analysis: Dict[str, Any]
+    ) -> float:
+        """상품과 이미지 분석 결과 간 유사도 점수 계산"""
+        try:
+            score = 0.0
+            
+            product_name = product.get("name", "").lower()
+            product_info = analysis.get("product_info", {})
+            
+            # 브랜드 매칭 (가중치: 0.3)
+            brand = product_info.get("brand", "").lower()
+            if brand and brand in product_name:
+                score += 0.3
+            
+            # 키워드 매칭 (가중치: 0.4)
+            keywords = product_info.get("keywords", [])
+            keyword_matches = sum(
+                1 for keyword in keywords 
+                if keyword.lower() in product_name
+            )
+            if keywords:
+                score += 0.4 * (keyword_matches / len(keywords))
+            
+            # 카테고리 매칭 (가중치: 0.2)
+            category = product_info.get("category", "")
+            if category and category != "general":
+                # 간단한 카테고리 매칭 로직
+                if any(cat_word in product_name for cat_word in category.split()):
+                    score += 0.2
+            
+            # 가격 합리성 (가중치: 0.1)
+            price = product.get("price", 0)
+            if 1000 <= price <= 10000000:  # 합리적인 가격 범위
+                score += 0.1
+            
+            return min(score, 1.0)  # 최대 1.0으로 제한
+            
+        except Exception as e:
+            return 0.0
+
+class ImageSimilaritySearchTool(BaseTool):
+    """이미지 유사도 기반 검색 도구"""
+    name = "image_similarity_search"
+    description = "이미지의 시각적 특성을 기반으로 유사한 상품을 검색합니다."
+    args_schema = ImageSearchInput
+    
+    def __init__(self):
+        super().__init__()
+        self.image_analyzer = ImageAnalysisService()
+    
+    def _run(self, image_data: bytes, additional_context: str = "") -> Dict[str, Any]:
+        return asyncio.run(self._arun(image_data, additional_context))
+    
+    async def _arun(self, image_data: bytes, additional_context: str = "") -> Dict[str, Any]:
+        """시각적 유사도 기반 검색"""
+        try:
+            # 이미지 분석
+            analysis_result = await self.image_analyzer.analyze_product_image(image_data)
+            
+            if not analysis_result["success"]:
+                return {
+                    "success": False,
+                    "error": "이미지 분석에 실패했습니다."
+                }
+            
+            # 색상 기반 검색 쿼리 생성
+            colors = analysis_result["analysis"].get("attributes", {}).get("colors", [])
+            color_query = self._generate_color_query(colors)
+            
+            # 형태 기반 검색 쿼리 생성
+            objects = analysis_result["analysis"].get("objects", [])
+            shape_query = self._generate_shape_query(objects)
+            
+            # 통합 쿼리 생성
+            visual_query = f"{color_query} {shape_query}".strip()
+            
+            return {
+                "success": True,
+                "visual_query": visual_query,
+                "color_analysis": colors,
+                "shape_analysis": objects,
+                "recommendation": f"'{visual_query}' 키워드로 검색해보세요."
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def _generate_color_query(self, colors: List[Dict[str, Any]]) -> str:
+        """색상 기반 쿼리 생성"""
+        if not colors:
+            return ""
+        
+        # 주요 색상 (30% 이상)
+        main_colors = [
+            color for color in colors 
+            if color.get("percentage", 0) > 0.3
+        ]
+        
+        if main_colors:
+            # 색상명 매핑 (간단한 버전)
+            color_names = {
+                "red": "빨간",
+                "blue": "파란",
+                "green": "초록",
+                "yellow": "노란",
+                "black": "검은",
+                "white": "흰",
+                "gray": "회색",
+                "brown": "갈색"
+            }
+            
+            # RGB 값을 기반으로 색상명 추정 (간단한 로직)
+            main_color = main_colors[0]
+            rgb = main_color.get("rgb", [0, 0, 0])
+            
+            if max(rgb) < 50:
+                return "검은색"
+            elif min(rgb) > 200:
+                return "흰색"
+            elif rgb[0] > rgb[1] and rgb[0] > rgb[2]:
+                return "빨간색"
+            elif rgb[1] > rgb[0] and rgb[1] > rgb[2]:
+                return "초록색"
+            elif rgb[2] > rgb[0] and rgb[2] > rgb[1]:
+                return "파란색"
+        
+        return ""
+    
+    def _generate_shape_query(self, objects: List[Dict[str, Any]]) -> str:
+        """형태 기반 쿼리 생성"""
+        if not objects:
+            return ""
+        
+        # 가장 신뢰도 높은 객체
+        main_object = max(objects, key=lambda x: x.get("confidence", 0))
+        object_name = main_object.get("name", "")
+        
+        # 객체명을 한국어로 매핑 (간단한 버전)
+        object_mapping = {
+            "Mobile phone": "휴대폰",
+            "Laptop": "노트북",
+            "Clothing": "의류",
+            "Footwear": "신발",
+            "Bag": "가방",
+            "Watch": "시계",
+            "Sunglasses": "선글라스"
+        }
+        
+        return object_mapping.get(object_name, object_name)
+
+def get_image_search_tools() -> List[BaseTool]:
+    """이미지 검색 도구 리스트 반환"""
+    return [
+        ImageProductSearchTool(),
+        ImageSimilaritySearchTool()
+    ]
+```
+
+### 7.4 Agent 워크플로우 업데이트
+
+#### 이미지 검색 워크플로우 (`src/agent/workflows/image_search_workflow.py`)
+```python
+from typing import Dict, Any, List
+from langchain.schema import BaseMessage, HumanMessage, AIMessage
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolExecutor
+
+from ..models.agent_models import AgentState
+from ..tools.image_search_tools import get_image_search_tools
+
+def create_image_search_workflow(llm, tool_executor: ToolExecutor) -> StateGraph:
+    """이미지 검색 워크플로우 생성"""
+    
+    workflow = StateGraph(AgentState)
+    
+    # 노드 정의
+    workflow.add_node("analyze_image", analyze_image_node)
+    workflow.add_node("generate_search_query", generate_search_query_node)
+    workflow.add_node("search_products", search_products_node)
+    workflow.add_node("rank_results", rank_results_node)
+    workflow.add_node("generate_response", generate_response_node)
+    
+    # 엣지 정의
+    workflow.set_entry_point("analyze_image")
+    workflow.add_edge("analyze_image", "generate_search_query")
+    workflow.add_edge("generate_search_query", "search_products")
+    workflow.add_edge("search_products", "rank_results")
+    workflow.add_edge("rank_results", "generate_response")
+    workflow.add_edge("generate_response", END)
+    
+    return workflow
+
+async def analyze_image_node(state: AgentState) -> AgentState:
+    """이미지 분석 노드"""
+    try:
+        # 이미지 데이터 추출
+        image_data = state.get("image_data")
+        if not image_data:
+            state["error"] = "이미지 데이터가 없습니다."
+            return state
+        
+        # 이미지 검색 도구 사용
+        from ..tools.image_search_tools import ImageProductSearchTool
+        image_tool = ImageProductSearchTool()
+        
+        # 이미지 분석 실행
+        analysis_result = await image_tool._arun(
+            image_data=image_data,
+            additional_context=state.get("user_query", "")
+        )
+        
+        state["image_analysis"] = analysis_result
+        state["current_step"] = "image_analyzed"
+        
+        return state
+        
+    except Exception as e:
+        state["error"] = f"이미지 분석 중 오류: {str(e)}"
+        return state
+
+async def generate_search_query_node(state: AgentState) -> AgentState:
+    """검색 쿼리 생성 노드"""
+    try:
+        analysis_result = state.get("image_analysis", {})
+        
+        if not analysis_result.get("success", False):
+            state["error"] = "이미지 분석에 실패했습니다."
+            return state
+        
+        # 검색 쿼리 추출
+        search_query = analysis_result.get("search_query", "")
+        
+        # 사용자 추가 입력과 결합
+        user_query = state.get("user_query", "")
+        if user_query and user_query not in search_query:
+            search_query = f"{search_query} {user_query}".strip()
+        
+        state["search_query"] = search_query
+        state["current_step"] = "query_generated"
+        
+        return state
+        
+    except Exception as e:
+        state["error"] = f"검색 쿼리 생성 중 오류: {str(e)}"
+        return state
+
+async def search_products_node(state: AgentState) -> AgentState:
+    """상품 검색 노드"""
+    try:
+        search_query = state.get("search_query", "")
+        
+        if not search_query:
+            state["error"] = "검색 쿼리가 없습니다."
+            return state
+        
+        # 다중 쇼핑몰 검색
+        from ..tools.shopping_crawlers import MultiShoppingCrawler
+        crawler = MultiShoppingCrawler()
+        
+        search_results = await crawler._arun(search_query, max_results=15)
+        
+        state["search_results"] = search_results.get("products", [])
+        state["current_step"] = "products_searched"
+        
+        return state
+        
+    except Exception as e:
+        state["error"] = f"상품 검색 중 오류: {str(e)}"
+        return state
+
+async def rank_results_node(state: AgentState) -> AgentState:
+    """결과 랭킹 노드"""
+    try:
+        search_results = state.get("search_results", [])
+        image_analysis = state.get("image_analysis", {})
+        
+        if not search_results:
+            state["ranked_results"] = []
+            return state
+        
+        # 이미지 분석 결과를 바탕으로 유사도 계산
+        from ..tools.image_search_tools import ImageProductSearchTool
+        image_tool = ImageProductSearchTool()
+        
+        analysis_data = image_analysis.get("image_analysis", {})
+        ranked_results = await image_tool._filter_and_rank_results(
+            search_results, 
+            analysis_data
+        )
+        
+        state["ranked_results"] = ranked_results
+        state["current_step"] = "results_ranked"
+        
+        return state
+        
+    except Exception as e:
+        state["error"] = f"결과 랭킹 중 오류: {str(e)}"
+        state["ranked_results"] = state.get("search_results", [])
+        return state
+
+async def generate_response_node(state: AgentState) -> AgentState:
+    """응답 생성 노드"""
+    try:
+        ranked_results = state.get("ranked_results", [])
+        image_analysis = state.get("image_analysis", {})
+        search_query = state.get("search_query", "")
+        
+        # 응답 메시지 생성
+        if ranked_results:
+            response_message = f"""
+🔍 **이미지 분석 결과**
+
+📸 **감지된 상품 정보:**
+- 검색 키워드: {search_query}
+- 신뢰도: {image_analysis.get('confidence', 0.0):.1%}
+
+🛒 **유사 상품 {len(ranked_results)}개를 찾았습니다!**
+
+가장 유사한 상품들을 유사도 순으로 정렬했습니다. 
+이미지와 가장 비슷한 상품부터 확인해보세요.
+            """
+        else:
+            response_message = f"""
+🔍 **이미지 분석 결과**
+
+📸 이미지에서 상품을 분석했지만, 정확히 일치하는 상품을 찾지 못했습니다.
+
+💡 **추천 방법:**
+- 더 명확한 상품 이미지를 업로드해보세요
+- 상품명을 직접 입력해서 검색해보세요
+- 브랜드명이나 모델명을 함께 입력해보세요
+
+검색 키워드: {search_query}
+            """
+        
+        # 최종 메시지 추가
+        final_message = AIMessage(content=response_message)
+        state["messages"].append(final_message)
+        
+        state["current_step"] = "completed"
+        state["final_response"] = response_message
+        
+        return state
+        
+    except Exception as e:
+        error_message = f"응답 생성 중 오류가 발생했습니다: {str(e)}"
+        error_ai_message = AIMessage(content=error_message)
+        state["messages"].append(error_ai_message)
+        state["error"] = str(e)
+        return state
+```
+
+### 7.5 스트리밍 서비스 업데이트
+
+#### 이미지 스트리밍 업데이트 (`src/api/services/streaming.py` 추가)
+```python
+# 기존 StreamingService 클래스에 추가
+
+async def stream_image_response(
+    self,
+    image_data: bytes,
+    message: str,
+    session_id: str
+) -> AsyncGenerator[str, None]:
+    """이미지 검색 스트리밍 응답 (업데이트된 버전)"""
+    
+    try:
+        # 이미지 분석 시작
+        yield await self._send_event("image_analysis_start", {
+            "message": "📸 이미지를 분석하고 있습니다...",
+            "step": "image_processing"
+        }, session_id)
+        
+        # 이미지 분석 서비스 초기화
+        from ...agent.services.image_analysis import ImageAnalysisService
+        image_analyzer = ImageAnalysisService()
+        
+        # 이미지 분석 실행
+        analysis_result = await image_analyzer.analyze_product_image(image_data)
+        
+        if analysis_result["success"]:
+            # 분석 완료
+            yield await self._send_event("image_analysis_complete", {
+                "message": "✅ 이미지 분석이 완료되었습니다!",
+                "analysis": analysis_result["analysis"],
+                "confidence": analysis_result.get("confidence", 0.0)
+            }, session_id)
+            
+            # 상품 검색 시작
+            yield await self._send_event("product_search_start", {
+                "message": "🔍 유사한 상품을 검색하고 있습니다...",
+                "step": "product_search"
+            }, session_id)
+            
+            # 이미지 검색 도구 사용
+            from ...agent.tools.image_search_tools import ImageProductSearchTool
+            image_search_tool = ImageProductSearchTool()
+            
+            search_result = await image_search_tool._arun(image_data, message)
+            
+            if search_result["success"] and search_result["products"]:
+                # 검색 결과 전송
+                yield await self._send_event("search_results", {
+                    "message": f"🎉 {len(search_result['products'])}개의 유사 상품을 찾았습니다!",
+                    "products": search_result["products"],
+                    "search_query": search_result.get("search_query", ""),
+                    "total_found": search_result.get("total_found", 0)
+                }, session_id)
+                
+                # 최종 추천
+                best_match = search_result["products"][0] if search_result["products"] else None
+                if best_match:
+                    yield await self._send_event("recommendation", {
+                        "message": "🏆 가장 유사한 상품을 찾았습니다!",
+                        "best_match": best_match,
+                        "similarity_score": best_match.get("similarity_score", 0.0)
+                    }, session_id)
+            else:
+                # 검색 결과 없음
+                yield await self._send_event("no_results", {
+                    "message": "😔 정확히 일치하는 상품을 찾지 못했습니다.",
+                    "suggestions": [
+                        "더 명확한 상품 이미지를 업로드해보세요",
+                        "상품명을 직접 입력해서 검색해보세요",
+                        "브랜드명이나 모델명을 함께 입력해보세요"
+                    ]
+                }, session_id)
+        else:
+            # 분석 실패
+            yield await self._send_event("analysis_failed", {
+                "message": "❌ 이미지 분석에 실패했습니다.",
+                "error": analysis_result.get("error", "알 수 없는 오류"),
+                "suggestions": [
+                    "다른 이미지를 시도해보세요",
+                    "이미지가 선명한지 확인해보세요",
+                    "상품이 명확히 보이는 이미지를 사용해보세요"
+                ]
+            }, session_id)
+        
+    except Exception as e:
+        yield await self._send_event("error", {
+            "message": "이미지 처리 중 오류가 발생했습니다.",
+            "error": str(e),
+            "error_type": "image_processing_error"
+        }, session_id)
+    
+    finally:
+        yield await self._send_event("complete", {
+            "message": "이미지 검색이 완료되었습니다.",
+            "session_id": session_id
+        }, session_id)
+```
+
+### 7.6 테스트 코드
+
+#### 이미지 검색 테스트 (`tests/test_agent/test_image_search.py`)
+```python
+import pytest
+import asyncio
+import io
+from PIL import Image
+import numpy as np
+
+from src.agent.services.image_analysis import ImageAnalysisService
+from src.agent.tools.image_search_tools import ImageProductSearchTool
+
+@pytest.fixture
+def sample_image_data():
+    """테스트용 샘플 이미지 생성"""
+    # 간단한 테스트 이미지 생성
+    image = Image.new('RGB', (300, 300), color='red')
+    buffer = io.BytesIO()
+    image.save(buffer, format='JPEG')
+    return buffer.getvalue()
+
+@pytest.fixture
+def image_analysis_service():
+    return ImageAnalysisService()
+
+@pytest.fixture
+def image_search_tool():
+    return ImageProductSearchTool()
+
+@pytest.mark.asyncio
+async def test_image_analysis_service(image_analysis_service, sample_image_data):
+    """이미지 분석 서비스 테스트"""
+    result = await image_analysis_service.analyze_product_image(sample_image_data)
+    
+    assert "success" in result
+    if result["success"]:
+        assert "analysis" in result
+        assert "confidence" in result
+        
+        analysis = result["analysis"]
+        assert "product_info" in analysis
+        assert "objects" in analysis
+        assert "labels" in analysis
+
+@pytest.mark.asyncio
+async def test_image_search_tool(image_search_tool, sample_image_data):
+    """이미지 검색 도구 테스트"""
+    result = await image_search_tool._arun(sample_image_data, "테스트 상품")
+    
+    assert "success" in result
+    assert "products" in result
+    assert "search_query" in result
+    
+    if result["success"]:
+        assert isinstance(result["products"], list)
+
+def test_image_preprocessing(image_analysis_service, sample_image_data):
+    """이미지 전처리 테스트"""
+    processed = asyncio.run(
+        image_analysis_service._preprocess_image(sample_image_data)
+    )
+    
+    assert isinstance(processed, bytes)
+    assert len(processed) > 0
+
+@pytest.mark.asyncio
+async def test_search_query_generation(image_search_tool):
+    """검색 쿼리 생성 테스트"""
+    mock_analysis = {
+        "product_info": {
+            "brand": "Apple",
+            "name": "iPhone 15 Pro",
+            "keywords": ["phone", "smartphone", "mobile"]
+        }
+    }
+    
+    query = await image_search_tool._generate_search_query(mock_analysis, "최신")
+    
+    assert isinstance(query, str)
+    assert len(query) > 0
+    assert "Apple" in query or "iPhone" in query
+
+def test_similarity_score_calculation(image_search_tool):
+    """유사도 점수 계산 테스트"""
+    mock_product = {
+        "name": "Apple iPhone 15 Pro 256GB",
+        "price": 1500000
+    }
+    
+    mock_analysis = {
+        "product_info": {
+            "brand": "Apple",
+            "keywords": ["iPhone", "smartphone"]
+        }
+    }
+    
+    score = asyncio.run(
+        image_search_tool._calculate_similarity_score(mock_product, mock_analysis)
+    )
+    
+    assert isinstance(score, float)
+    assert 0.0 <= score <= 1.0
+
+@pytest.mark.asyncio
+async def test_color_analysis(image_analysis_service, sample_image_data):
+    """색상 분석 테스트"""
+    colors = await image_analysis_service._analyze_colors(sample_image_data)
+    
+    assert isinstance(colors, list)
+    if colors:
+        color = colors[0]
+        assert "rgb" in color
+        assert "hex" in color
+        assert "percentage" in color
+
+def test_product_name_cleaning(image_search_tool):
+    """상품명 정제 테스트"""
+    dirty_name = "New!!! Apple iPhone 15 Pro @@@ Original Authentic Sale!!!"
+    cleaned = image_search_tool._clean_product_name(dirty_name)
+    
+    assert "Apple" in cleaned
+    assert "iPhone" in cleaned
+    assert "!!!" not in cleaned
+    assert "@@@" not in cleaned
+
+def test_keyword_relevance(image_search_tool):
+    """키워드 관련성 테스트"""
+    assert image_search_tool._is_relevant_keyword("smartphone") == True
+    assert image_search_tool._is_relevant_keyword("iPhone") == True
+    assert image_search_tool._is_relevant_keyword("color") == False
+    assert image_search_tool._is_relevant_keyword("a") == False
+```
+
+## ✅ 완료 기준
+- [ ] Google Vision API 연동 완료
+- [ ] 이미지 분석 서비스 구현 (객체, 텍스트, 라벨, 로고 감지)
+- [ ] 이미지 전처리 및 품질 향상 구현
+- [ ] 색상 분석 및 시각적 특성 추출
+- [ ] 이미지 기반 상품 검색 도구 구현
+- [ ] 검색 쿼리 자동 생성 기능
+- [ ] 유사도 기반 결과 랭킹 시스템
+- [ ] 이미지 검색 워크플로우 구현
+- [ ] 스트리밍 API에 이미지 검색 통합
+- [ ] 포괄적인 테스트 코드 작성
+
+## 🧪 테스트 방법
+
+### 1. 이미지 분석 테스트
+```bash
+# 테스트 실행
+pytest tests/test_agent/test_image_search.py -v
+
+# 개별 테스트
+pytest tests/test_agent/test_image_search.py::test_image_analysis_service -v
+```
+
+### 2. 실제 이미지 업로드 테스트
+```bash
+# 서버 실행
+python scripts/run_api.py
+
+# 이미지 업로드 테스트
+curl -X POST http://localhost:8000/api/v1/chat/image \
+  -F "message=이 상품과 비슷한 것을 찾아주세요" \
+  -F "session_id=test-session" \
+  -F "image=@test_product.jpg"
+```
+
+### 3. Streamlit UI에서 이미지 검색 테스트
+```bash
+# Streamlit 앱 실행
+streamlit run src/ui/streamlit_app.py
+
+# 웹 브라우저에서 이미지 업로드 기능 테스트
+```
+
+## 🔗 다음 단계
+[Phase 3 Step 8 - 성능 최적화 및 캐싱](mdc:.cursor/rules/tasks/phase3-step8-optimization.mdc)
+
+## 📚 참고 문서
+- [개발 태스크 계획](mdc:.cursor/rules/development-task-plan.mdc)
+- [기술 아키텍처](mdc:.cursor/rules/technical-architecture.mdc)
+- [Google Vision API 문서](https://cloud.google.com/vision/docs)
+

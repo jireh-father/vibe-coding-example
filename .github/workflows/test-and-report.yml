@@ -1,0 +1,113 @@
+name: Test and Report Coverage
+
+on:
+  push:
+    branches:
+      - main  # 모든 브랜치에 대한 푸시
+  pull_request:
+    branches:
+      - main  # main 브랜치로의 PR만 실행
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update && sudo apt-get install -y bc
+      
+      - name: Run tests with coverage
+        run: |
+          python -m pytest --cov=src --cov=frontend --cov-report=xml --cov-report=term
+      
+      - name: Generate coverage badge
+        run: |
+          pip install genbadge[coverage]
+          genbadge coverage -i coverage.xml -o coverage-badge.svg
+      
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+      
+      - name: Store coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage-badge.svg
+      
+      - name: Send coverage report to Discord
+        if: always()  # 성공/실패 상관없이 항상 실행
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          # XML에서 커버리지 비율 추출 (0.0-1.0 사이의 값)
+          COVERAGE_PCT=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(root.attrib['line-rate'])")
+          
+          # 퍼센트로 변환 (소수점 두 자리까지)
+          COVERAGE_PCT=$(echo "$COVERAGE_PCT * 100" | bc -l | xargs printf "%.2f")
+          
+          # 테스트 결과에 따라 메시지 및 색상 설정
+          if [ "${{ job.status }}" = "success" ]; then
+            COLOR=3066993  # 초록색
+            STATUS="✅ 성공"
+          else
+            COLOR=15158332  # 빨간색
+            STATUS="❌ 실패"
+          fi
+          
+          # JSON 페이로드 생성
+          payload=$(cat <<EOF
+          {
+            "embeds": [
+              {
+                "title": "테스트 및 커버리지 리포트",
+                "description": "브랜치: \`${{ github.ref_name }}\`\n커밋: [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})",
+                "color": $COLOR,
+                "fields": [
+                  {
+                    "name": "상태",
+                    "value": "$STATUS",
+                    "inline": true
+                  },
+                  {
+                    "name": "커버리지",
+                    "value": "${COVERAGE_PCT}%",
+                    "inline": true
+                  },
+                  {
+                    "name": "실행자",
+                    "value": "${{ github.actor }}",
+                    "inline": true
+                  }
+                ],
+                "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+              }
+            ]
+          }
+          EOF
+          )
+          
+          # 웹훅 URL이 설정되어 있는지 확인
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "Discord webhook URL is not set. Skipping sending report to Discord."
+            exit 0
+          fi
+          
+          # Discord로 전송
+          curl -H "Content-Type: application/json" -d "$payload" $DISCORD_WEBHOOK 

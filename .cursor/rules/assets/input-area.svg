@@ -1,0 +1,17 @@
+<svg width="400" height="60" xmlns="http://www.w3.org/2000/svg">
+  <!-- 입력창 배경 -->
+  <rect x="10" y="10" width="380" height="40" fill="#ffffff" rx="20" stroke="#dee2e6"/>
+  
+  <!-- 버튼 배경들 -->
+  <circle cx="320" cy="30" r="15" fill="#007bff"/>
+  <circle cx="350" cy="30" r="15" fill="#28a745"/>
+  <circle cx="375" cy="30" r="12" fill="#dc3545"/>
+  
+  <!-- 플레이스홀더 텍스트 -->
+  <text x="25" y="33" font-family="Arial" font-size="14" fill="#6c757d">상품명을 입력하거나 이미지를 업로드하세요...</text>
+  
+  <!-- 버튼 텍스트들 -->
+  <text x="315" y="35" font-family="Arial" font-size="12" fill="white">🎤</text>
+  <text x="345" y="35" font-family="Arial" font-size="12" fill="white">📷</text>
+  <text x="371" y="34" font-family="Arial" font-size="10" fill="white">→</text>
+</svg> 

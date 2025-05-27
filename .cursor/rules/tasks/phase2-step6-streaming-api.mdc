@@ -1,0 +1,974 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# 6단계: 스트리밍 API 완성
+
+## 🎯 목표
+실시간 통신 시스템 완성 - Server-Sent Events 구현, 실시간 검색 진행 상황 전송, 에러 스트리밍, 세션 관리
+
+## 📋 상세 태스크
+
+### 6.1 고급 스트리밍 서비스 구현
+
+#### 향상된 스트리밍 서비스 (`src/api/services/streaming.py` 업데이트)
+```python
+import asyncio
+import json
+import uuid
+from typing import AsyncGenerator, Dict, Any, Optional, List
+from datetime import datetime
+import logging
+
+from ..models.chat import StreamEvent
+from ...agent.core import PriceFinderAgent
+
+logger = logging.getLogger(__name__)
+
+class StreamingService:
+    """고급 스트리밍 서비스 클래스"""
+    
+    def __init__(self):
+        self.agent = PriceFinderAgent()
+        self.active_sessions = {}  # 활성 세션 관리
+    
+    @staticmethod
+    async def create_sse_response(event: StreamEvent) -> str:
+        """Server-Sent Events 형식으로 응답 생성"""
+        data = {
+            "type": event.type,
+            "data": event.data,
+            "timestamp": event.timestamp.isoformat(),
+            "session_id": event.session_id
+        }
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    
+    async def stream_chat_response(
+        self, 
+        message: str, 
+        session_id: str
+    ) -> AsyncGenerator[str, None]:
+        """Agent를 사용한 채팅 응답 스트리밍"""
+        
+        # 세션 등록
+        self.active_sessions[session_id] = {
+            "start_time": datetime.now(),
+            "message": message,
+            "status": "processing"
+        }
+        
+        try:
+            # 시작 이벤트
+            yield await self._send_event("start", {
+                "message": "🔍 AI Agent가 요청을 분석하고 있습니다...",
+                "session_id": session_id
+            }, session_id)
+            
+            # 메시지 분석 단계
+            yield await self._send_event("analysis", {
+                "message": f"'{message}' 요청을 분석 중입니다...",
+                "step": "message_analysis"
+            }, session_id)
+            
+            await asyncio.sleep(0.5)  # 분석 시뮬레이션
+            
+            # 검색 시작 단계
+            yield await self._send_event("search_start", {
+                "message": "🛒 여러 쇼핑몰에서 상품을 검색하고 있습니다...",
+                "step": "product_search",
+                "shops": ["쿠팡", "11번가", "G마켓", "옥션", "네이버쇼핑"]
+            }, session_id)
+            
+            # Agent 실행
+            result = await self.agent.process_message(message, session_id)
+            
+            if result["success"]:
+                # 검색 결과 처리
+                agent_result = result["result"]
+                
+                # 검색 결과가 있는 경우
+                if hasattr(agent_result, 'search_results') and agent_result.search_results:
+                    yield await self._send_event("search_results", {
+                        "message": f"✅ {len(agent_result.search_results)}개 상품을 찾았습니다!",
+                        "products": agent_result.search_results,
+                        "step": "results_found"
+                    }, session_id)
+                    
+                    # 가격 비교 단계
+                    yield await self._send_event("price_comparison", {
+                        "message": "💰 가격을 비교하고 최적의 옵션을 찾고 있습니다...",
+                        "step": "price_analysis"
+                    }, session_id)
+                    
+                    await asyncio.sleep(0.5)  # 비교 시뮬레이션
+                    
+                    # 최종 추천
+                    best_deal = self._find_best_deal(agent_result.search_results)
+                    yield await self._send_event("recommendation", {
+                        "message": "🏆 최적의 상품을 찾았습니다!",
+                        "best_deal": best_deal,
+                        "step": "recommendation"
+                    }, session_id)
+                
+                # Agent 최종 응답
+                final_message = self._generate_final_message(agent_result)
+                yield await self._send_event("agent_response", {
+                    "message": final_message,
+                    "agent_result": agent_result,
+                    "tools_used": result.get("tools_used", [])
+                }, session_id)
+                
+            else:
+                # 에러 처리
+                yield await self._send_event("error", {
+                    "message": "죄송합니다. 검색 중 문제가 발생했습니다.",
+                    "error": result["error"],
+                    "error_type": "agent_error"
+                }, session_id)
+        
+        except Exception as e:
+            logger.error(f"스트리밍 처리 중 오류: {str(e)}")
+            yield await self._send_event("error", {
+                "message": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+                "error": str(e),
+                "error_type": "system_error"
+            }, session_id)
+        
+        finally:
+            # 완료 이벤트
+            yield await self._send_event("complete", {
+                "message": "검색이 완료되었습니다.",
+                "session_id": session_id,
+                "duration": self._calculate_duration(session_id)
+            }, session_id)
+            
+            # 세션 정리
+            self._cleanup_session(session_id)
+    
+    async def stream_image_response(
+        self,
+        image_data: bytes,
+        message: str,
+        session_id: str
+    ) -> AsyncGenerator[str, None]:
+        """이미지 검색 스트리밍 응답"""
+        
+        try:
+            # 이미지 분석 시작
+            yield await self._send_event("image_analysis_start", {
+                "message": "📸 이미지를 분석하고 있습니다...",
+                "step": "image_processing"
+            }, session_id)
+            
+            await asyncio.sleep(1)  # 이미지 분석 시뮬레이션
+            
+            # 상품 식별
+            yield await self._send_event("product_identification", {
+                "message": "🔍 이미지에서 상품을 식별하고 있습니다...",
+                "step": "product_recognition"
+            }, session_id)
+            
+            # TODO: 7단계에서 실제 이미지 분석 구현
+            # 현재는 시뮬레이션 응답
+            yield await self._send_event("image_result", {
+                "message": "이미지 검색 기능은 7단계에서 구현됩니다.",
+                "identified_product": "상품 식별 예정",
+                "confidence": 0.0
+            }, session_id)
+            
+        except Exception as e:
+            yield await self._send_event("error", {
+                "message": "이미지 처리 중 오류가 발생했습니다.",
+                "error": str(e),
+                "error_type": "image_processing_error"
+            }, session_id)
+        
+        finally:
+            yield await self._send_event("complete", {
+                "message": "이미지 검색이 완료되었습니다.",
+                "session_id": session_id
+            }, session_id)
+    
+    async def _send_event(self, event_type: str, data: Dict[str, Any], session_id: str) -> str:
+        """이벤트 전송 헬퍼"""
+        event = StreamEvent(
+            type=event_type,
+            data=data,
+            session_id=session_id,
+            timestamp=datetime.now()
+        )
+        return await self.create_sse_response(event)
+    
+    def _find_best_deal(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """최적 상품 찾기"""
+        if not products:
+            return {}
+        
+        # 총 가격 기준으로 정렬
+        sorted_products = sorted(
+            products, 
+            key=lambda x: x.get('price', float('inf')) + x.get('shipping_fee', 0)
+        )
+        
+        best_product = sorted_products[0]
+        total_price = best_product.get('price', 0) + best_product.get('shipping_fee', 0)
+        
+        return {
+            "product": best_product,
+            "total_price": total_price,
+            "savings": self._calculate_savings(products, best_product),
+            "reasons": self._get_recommendation_reasons(best_product)
+        }
+    
+    def _calculate_savings(self, products: List[Dict[str, Any]], best_product: Dict[str, Any]) -> int:
+        """절약 금액 계산"""
+        if len(products) < 2:
+            return 0
+        
+        prices = [p.get('price', 0) + p.get('shipping_fee', 0) for p in products]
+        best_price = best_product.get('price', 0) + best_product.get('shipping_fee', 0)
+        
+        return max(prices) - best_price
+    
+    def _get_recommendation_reasons(self, product: Dict[str, Any]) -> List[str]:
+        """추천 이유 생성"""
+        reasons = ["최저가 상품"]
+        
+        if product.get('shipping_fee', 0) == 0:
+            reasons.append("무료배송")
+        
+        if product.get('rating', 0) >= 4.0:
+            reasons.append(f"높은 평점 ({product.get('rating', 0):.1f}점)")
+        
+        if product.get('discount_rate', 0) > 10:
+            reasons.append(f"높은 할인율 ({product.get('discount_rate', 0):.1f}%)")
+        
+        return reasons
+    
+    def _generate_final_message(self, agent_result) -> str:
+        """최종 메시지 생성"""
+        if hasattr(agent_result, 'search_results') and agent_result.search_results:
+            product_count = len(agent_result.search_results)
+            return f"🎉 총 {product_count}개 상품을 찾아 가격을 비교했습니다. 최적의 옵션을 확인해보세요!"
+        else:
+            return "검색 결과를 처리했습니다. 추가 도움이 필요하시면 말씀해 주세요."
+    
+    def _calculate_duration(self, session_id: str) -> float:
+        """세션 지속 시간 계산"""
+        if session_id in self.active_sessions:
+            start_time = self.active_sessions[session_id]["start_time"]
+            return (datetime.now() - start_time).total_seconds()
+        return 0.0
+    
+    def _cleanup_session(self, session_id: str):
+        """세션 정리"""
+        if session_id in self.active_sessions:
+            del self.active_sessions[session_id]
+    
+    async def get_session_status(self, session_id: str) -> Dict[str, Any]:
+        """세션 상태 조회"""
+        if session_id in self.active_sessions:
+            session = self.active_sessions[session_id]
+            return {
+                "active": True,
+                "start_time": session["start_time"].isoformat(),
+                "message": session["message"],
+                "status": session["status"],
+                "duration": self._calculate_duration(session_id)
+            }
+        return {"active": False}
+```
+
+### 6.2 세션 관리 시스템
+
+#### 세션 관리자 (`src/api/services/session_manager.py`)
+```python
+import uuid
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timedelta
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+class SessionManager:
+    """세션 관리 클래스"""
+    
+    def __init__(self):
+        self.sessions: Dict[str, Dict[str, Any]] = {}
+        self.session_timeout = 3600  # 1시간
+        self._cleanup_task = None
+        self._start_cleanup_task()
+    
+    def create_session(self) -> str:
+        """새 세션 생성"""
+        session_id = str(uuid.uuid4())
+        self.sessions[session_id] = {
+            "id": session_id,
+            "created_at": datetime.now(),
+            "last_activity": datetime.now(),
+            "message_count": 0,
+            "search_history": [],
+            "current_products": [],
+            "user_preferences": {},
+            "status": "active"
+        }
+        
+        logger.info(f"새 세션 생성: {session_id}")
+        return session_id
+    
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """세션 정보 조회"""
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            # 마지막 활동 시간 업데이트
+            session["last_activity"] = datetime.now()
+            return session
+        return None
+    
+    def update_session(self, session_id: str, updates: Dict[str, Any]) -> bool:
+        """세션 정보 업데이트"""
+        if session_id in self.sessions:
+            self.sessions[session_id].update(updates)
+            self.sessions[session_id]["last_activity"] = datetime.now()
+            return True
+        return False
+    
+    def add_message_to_session(self, session_id: str, message: Dict[str, Any]) -> bool:
+        """세션에 메시지 추가"""
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            session["message_count"] += 1
+            session["last_activity"] = datetime.now()
+            
+            # 검색 히스토리 업데이트
+            if message.get("role") == "user":
+                session["search_history"].append({
+                    "query": message.get("content", ""),
+                    "timestamp": datetime.now()
+                })
+            
+            return True
+        return False
+    
+    def add_products_to_session(self, session_id: str, products: List[Dict[str, Any]]) -> bool:
+        """세션에 상품 정보 추가"""
+        if session_id in self.sessions:
+            self.sessions[session_id]["current_products"] = products
+            self.sessions[session_id]["last_activity"] = datetime.now()
+            return True
+        return False
+    
+    def get_session_history(self, session_id: str) -> List[Dict[str, Any]]:
+        """세션 검색 히스토리 조회"""
+        session = self.get_session(session_id)
+        if session:
+            return session.get("search_history", [])
+        return []
+    
+    def get_session_products(self, session_id: str) -> List[Dict[str, Any]]:
+        """세션 현재 상품 목록 조회"""
+        session = self.get_session(session_id)
+        if session:
+            return session.get("current_products", [])
+        return []
+    
+    def delete_session(self, session_id: str) -> bool:
+        """세션 삭제"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            logger.info(f"세션 삭제: {session_id}")
+            return True
+        return False
+    
+    def get_active_sessions(self) -> List[str]:
+        """활성 세션 목록 조회"""
+        return list(self.sessions.keys())
+    
+    def get_session_stats(self) -> Dict[str, Any]:
+        """세션 통계 조회"""
+        total_sessions = len(self.sessions)
+        active_sessions = len([s for s in self.sessions.values() if s["status"] == "active"])
+        
+        if total_sessions > 0:
+            avg_messages = sum(s["message_count"] for s in self.sessions.values()) / total_sessions
+        else:
+            avg_messages = 0
+        
+        return {
+            "total_sessions": total_sessions,
+            "active_sessions": active_sessions,
+            "average_messages_per_session": round(avg_messages, 2),
+            "oldest_session": min(
+                (s["created_at"] for s in self.sessions.values()), 
+                default=None
+            )
+        }
+    
+    def _start_cleanup_task(self):
+        """정리 작업 시작"""
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+    
+    async def _periodic_cleanup(self):
+        """주기적 세션 정리"""
+        while True:
+            try:
+                await asyncio.sleep(300)  # 5분마다 실행
+                await self._cleanup_expired_sessions()
+            except Exception as e:
+                logger.error(f"세션 정리 중 오류: {str(e)}")
+    
+    async def _cleanup_expired_sessions(self):
+        """만료된 세션 정리"""
+        current_time = datetime.now()
+        expired_sessions = []
+        
+        for session_id, session in self.sessions.items():
+            last_activity = session["last_activity"]
+            if (current_time - last_activity).total_seconds() > self.session_timeout:
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            self.delete_session(session_id)
+            logger.info(f"만료된 세션 정리: {session_id}")
+        
+        if expired_sessions:
+            logger.info(f"총 {len(expired_sessions)}개 만료 세션 정리 완료")
+```
+
+### 6.3 에러 처리 및 복구 시스템
+
+#### 에러 핸들러 (`src/api/services/error_handler.py`)
+```python
+import logging
+from typing import Dict, Any, Optional
+from datetime import datetime
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+class ErrorType(Enum):
+    """에러 타입 정의"""
+    AGENT_ERROR = "agent_error"
+    NETWORK_ERROR = "network_error"
+    TIMEOUT_ERROR = "timeout_error"
+    VALIDATION_ERROR = "validation_error"
+    SYSTEM_ERROR = "system_error"
+    RATE_LIMIT_ERROR = "rate_limit_error"
+
+class ErrorHandler:
+    """에러 처리 클래스"""
+    
+    def __init__(self):
+        self.error_counts = {}
+        self.error_history = []
+    
+    def handle_error(
+        self, 
+        error: Exception, 
+        context: Dict[str, Any],
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """에러 처리 및 응답 생성"""
+        
+        error_type = self._classify_error(error)
+        error_info = {
+            "type": error_type.value,
+            "message": str(error),
+            "timestamp": datetime.now(),
+            "context": context,
+            "session_id": session_id
+        }
+        
+        # 에러 로깅
+        self._log_error(error_info)
+        
+        # 에러 통계 업데이트
+        self._update_error_stats(error_type)
+        
+        # 사용자 친화적 메시지 생성
+        user_message = self._generate_user_message(error_type, error)
+        
+        # 복구 제안 생성
+        recovery_suggestions = self._generate_recovery_suggestions(error_type)
+        
+        return {
+            "error": True,
+            "error_type": error_type.value,
+            "user_message": user_message,
+            "recovery_suggestions": recovery_suggestions,
+            "technical_details": str(error) if context.get("debug", False) else None,
+            "timestamp": error_info["timestamp"].isoformat()
+        }
+    
+    def _classify_error(self, error: Exception) -> ErrorType:
+        """에러 분류"""
+        error_str = str(error).lower()
+        
+        if "timeout" in error_str or "timed out" in error_str:
+            return ErrorType.TIMEOUT_ERROR
+        elif "network" in error_str or "connection" in error_str:
+            return ErrorType.NETWORK_ERROR
+        elif "rate limit" in error_str or "too many requests" in error_str:
+            return ErrorType.RATE_LIMIT_ERROR
+        elif "validation" in error_str or "invalid" in error_str:
+            return ErrorType.VALIDATION_ERROR
+        elif "agent" in error_str or "llm" in error_str:
+            return ErrorType.AGENT_ERROR
+        else:
+            return ErrorType.SYSTEM_ERROR
+    
+    def _generate_user_message(self, error_type: ErrorType, error: Exception) -> str:
+        """사용자 친화적 에러 메시지 생성"""
+        messages = {
+            ErrorType.AGENT_ERROR: "AI 처리 중 문제가 발생했습니다. 다른 방식으로 질문해 보시거나 잠시 후 다시 시도해 주세요.",
+            ErrorType.NETWORK_ERROR: "네트워크 연결에 문제가 있습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.",
+            ErrorType.TIMEOUT_ERROR: "요청 처리 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.",
+            ErrorType.VALIDATION_ERROR: "입력 정보에 문제가 있습니다. 올바른 형식으로 다시 입력해 주세요.",
+            ErrorType.RATE_LIMIT_ERROR: "너무 많은 요청이 발생했습니다. 잠시 후 다시 시도해 주세요.",
+            ErrorType.SYSTEM_ERROR: "시스템 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+        }
+        
+        return messages.get(error_type, "알 수 없는 오류가 발생했습니다.")
+    
+    def _generate_recovery_suggestions(self, error_type: ErrorType) -> List[str]:
+        """복구 제안 생성"""
+        suggestions = {
+            ErrorType.AGENT_ERROR: [
+                "더 구체적인 상품명으로 다시 검색해 보세요",
+                "브랜드명과 모델명을 포함해서 검색해 보세요",
+                "다른 키워드로 검색해 보세요"
+            ],
+            ErrorType.NETWORK_ERROR: [
+                "인터넷 연결 상태를 확인해 주세요",
+                "잠시 후 다시 시도해 주세요",
+                "페이지를 새로고침해 보세요"
+            ],
+            ErrorType.TIMEOUT_ERROR: [
+                "잠시 후 다시 시도해 주세요",
+                "더 간단한 검색어로 시도해 보세요"
+            ],
+            ErrorType.VALIDATION_ERROR: [
+                "올바른 상품명을 입력해 주세요",
+                "특수문자를 제거하고 다시 시도해 보세요"
+            ],
+            ErrorType.RATE_LIMIT_ERROR: [
+                "1-2분 후 다시 시도해 주세요",
+                "너무 빠른 연속 요청을 피해 주세요"
+            ],
+            ErrorType.SYSTEM_ERROR: [
+                "잠시 후 다시 시도해 주세요",
+                "문제가 지속되면 고객센터에 문의해 주세요"
+            ]
+        }
+        
+        return suggestions.get(error_type, ["잠시 후 다시 시도해 주세요"])
+    
+    def _log_error(self, error_info: Dict[str, Any]):
+        """에러 로깅"""
+        logger.error(
+            f"Error occurred: {error_info['type']} - {error_info['message']} "
+            f"(Session: {error_info['session_id']}, Context: {error_info['context']})"
+        )
+        
+        # 에러 히스토리에 추가
+        self.error_history.append(error_info)
+        
+        # 최근 100개만 유지
+        if len(self.error_history) > 100:
+            self.error_history = self.error_history[-100:]
+    
+    def _update_error_stats(self, error_type: ErrorType):
+        """에러 통계 업데이트"""
+        if error_type.value not in self.error_counts:
+            self.error_counts[error_type.value] = 0
+        self.error_counts[error_type.value] += 1
+    
+    def get_error_stats(self) -> Dict[str, Any]:
+        """에러 통계 조회"""
+        return {
+            "error_counts": self.error_counts,
+            "total_errors": sum(self.error_counts.values()),
+            "recent_errors": len([
+                e for e in self.error_history 
+                if (datetime.now() - e["timestamp"]).total_seconds() < 3600
+            ])
+        }
+```
+
+### 6.4 라우터 업데이트
+
+#### 채팅 라우터 업데이트 (`src/api/routers/chat.py`)
+```python
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Depends
+from fastapi.responses import StreamingResponse
+from typing import Optional
+import uuid
+import logging
+
+from ..models.chat import ChatRequest
+from ..services.streaming import StreamingService
+from ..services.session_manager import SessionManager
+from ..services.error_handler import ErrorHandler
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+# 서비스 인스턴스
+streaming_service = StreamingService()
+session_manager = SessionManager()
+error_handler = ErrorHandler()
+
+@router.post("/chat")
+async def chat_stream(request: ChatRequest):
+    """텍스트 채팅 스트리밍 엔드포인트"""
+    try:
+        # 세션 확인 및 생성
+        session = session_manager.get_session(request.session_id)
+        if not session:
+            session_manager.create_session()
+        
+        # 메시지를 세션에 추가
+        session_manager.add_message_to_session(request.session_id, {
+            "role": "user",
+            "content": request.message,
+            "timestamp": datetime.now()
+        })
+        
+        return StreamingResponse(
+            streaming_service.stream_chat_response(
+                message=request.message,
+                session_id=request.session_id
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "X-Session-ID": request.session_id
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"채팅 스트리밍 오류: {str(e)}")
+        error_response = error_handler.handle_error(
+            e, 
+            {"endpoint": "chat", "message": request.message},
+            request.session_id
+        )
+        raise HTTPException(status_code=500, detail=error_response)
+
+@router.post("/chat/image")
+async def chat_image_stream(
+    message: str = Form(...),
+    session_id: str = Form(...),
+    image: UploadFile = File(...)
+):
+    """이미지 채팅 스트리밍 엔드포인트"""
+    try:
+        # 이미지 파일 검증
+        if not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="이미지 파일만 업로드 가능합니다.")
+        
+        # 파일 크기 제한 (10MB)
+        if image.size > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="이미지 파일 크기는 10MB 이하여야 합니다.")
+        
+        # 이미지 데이터 읽기
+        image_data = await image.read()
+        
+        # 세션에 이미지 메시지 추가
+        session_manager.add_message_to_session(session_id, {
+            "role": "user",
+            "content": message,
+            "image": True,
+            "timestamp": datetime.now()
+        })
+        
+        return StreamingResponse(
+            streaming_service.stream_image_response(
+                image_data=image_data,
+                message=message,
+                session_id=session_id
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "X-Session-ID": session_id
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"이미지 채팅 스트리밍 오류: {str(e)}")
+        error_response = error_handler.handle_error(
+            e,
+            {"endpoint": "chat/image", "message": message},
+            session_id
+        )
+        raise HTTPException(status_code=500, detail=error_response)
+
+@router.get("/chat/session")
+async def create_session():
+    """새 채팅 세션 생성"""
+    try:
+        session_id = session_manager.create_session()
+        return {
+            "session_id": session_id,
+            "created_at": datetime.now().isoformat(),
+            "status": "active"
+        }
+    except Exception as e:
+        logger.error(f"세션 생성 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail="세션 생성에 실패했습니다.")
+
+@router.get("/chat/session/{session_id}")
+async def get_session_info(session_id: str):
+    """세션 정보 조회"""
+    try:
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+        
+        return {
+            "session_id": session_id,
+            "created_at": session["created_at"].isoformat(),
+            "last_activity": session["last_activity"].isoformat(),
+            "message_count": session["message_count"],
+            "status": session["status"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"세션 조회 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail="세션 조회에 실패했습니다.")
+
+@router.delete("/chat/session/{session_id}")
+async def delete_session(session_id: str):
+    """세션 삭제"""
+    try:
+        success = session_manager.delete_session(session_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+        
+        return {"message": "세션이 삭제되었습니다.", "session_id": session_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"세션 삭제 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail="세션 삭제에 실패했습니다.")
+
+@router.get("/chat/sessions/stats")
+async def get_session_stats():
+    """세션 통계 조회"""
+    try:
+        stats = session_manager.get_session_stats()
+        error_stats = error_handler.get_error_stats()
+        
+        return {
+            "session_stats": stats,
+            "error_stats": error_stats,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"통계 조회 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail="통계 조회에 실패했습니다.")
+```
+
+### 6.5 테스트 코드
+
+#### 스트리밍 테스트 (`tests/test_api/test_streaming_advanced.py`)
+```python
+import pytest
+import asyncio
+import json
+from fastapi.testclient import TestClient
+from src.api.main import app
+from src.api.services.streaming import StreamingService
+from src.api.services.session_manager import SessionManager
+
+client = TestClient(app)
+
+@pytest.fixture
+def streaming_service():
+    return StreamingService()
+
+@pytest.fixture
+def session_manager():
+    return SessionManager()
+
+def test_create_session():
+    """세션 생성 테스트"""
+    response = client.get("/api/v1/chat/session")
+    assert response.status_code == 200
+    data = response.json()
+    assert "session_id" in data
+    assert "created_at" in data
+    assert data["status"] == "active"
+
+def test_get_session_info():
+    """세션 정보 조회 테스트"""
+    # 세션 생성
+    create_response = client.get("/api/v1/chat/session")
+    session_id = create_response.json()["session_id"]
+    
+    # 세션 정보 조회
+    response = client.get(f"/api/v1/chat/session/{session_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == session_id
+    assert "message_count" in data
+
+def test_delete_session():
+    """세션 삭제 테스트"""
+    # 세션 생성
+    create_response = client.get("/api/v1/chat/session")
+    session_id = create_response.json()["session_id"]
+    
+    # 세션 삭제
+    response = client.delete(f"/api/v1/chat/session/{session_id}")
+    assert response.status_code == 200
+    
+    # 삭제된 세션 조회 시 404
+    response = client.get(f"/api/v1/chat/session/{session_id}")
+    assert response.status_code == 404
+
+def test_chat_stream_with_session():
+    """세션을 포함한 채팅 스트리밍 테스트"""
+    # 세션 생성
+    create_response = client.get("/api/v1/chat/session")
+    session_id = create_response.json()["session_id"]
+    
+    # 채팅 스트리밍
+    response = client.post(
+        "/api/v1/chat",
+        json={
+            "message": "아이폰 15 최저가",
+            "session_id": session_id
+        }
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+    assert response.headers["x-session-id"] == session_id
+
+@pytest.mark.asyncio
+async def test_streaming_service_events(streaming_service):
+    """스트리밍 서비스 이벤트 테스트"""
+    session_id = "test-session"
+    message = "테스트 상품 검색"
+    
+    events = []
+    async for event_data in streaming_service.stream_chat_response(message, session_id):
+        # SSE 형식 파싱
+        if event_data.startswith("data: "):
+            event_json = json.loads(event_data[6:])
+            events.append(event_json)
+    
+    # 이벤트 순서 확인
+    event_types = [event["type"] for event in events]
+    expected_types = ["start", "analysis", "search_start", "complete"]
+    
+    for expected_type in expected_types:
+        assert expected_type in event_types
+
+def test_session_manager_functionality(session_manager):
+    """세션 매니저 기능 테스트"""
+    # 세션 생성
+    session_id = session_manager.create_session()
+    assert session_id is not None
+    
+    # 세션 조회
+    session = session_manager.get_session(session_id)
+    assert session is not None
+    assert session["id"] == session_id
+    
+    # 메시지 추가
+    success = session_manager.add_message_to_session(session_id, {
+        "role": "user",
+        "content": "테스트 메시지"
+    })
+    assert success is True
+    
+    # 세션 삭제
+    success = session_manager.delete_session(session_id)
+    assert success is True
+    
+    # 삭제된 세션 조회
+    session = session_manager.get_session(session_id)
+    assert session is None
+
+def test_error_handling():
+    """에러 처리 테스트"""
+    # 존재하지 않는 세션으로 요청
+    response = client.get("/api/v1/chat/session/invalid-session-id")
+    assert response.status_code == 404
+    
+    # 잘못된 형식의 요청
+    response = client.post("/api/v1/chat", json={})
+    assert response.status_code == 422  # Validation error
+
+def test_session_stats():
+    """세션 통계 테스트"""
+    response = client.get("/api/v1/chat/sessions/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert "session_stats" in data
+    assert "error_stats" in data
+```
+
+## ✅ 완료 기준
+- [ ] 고급 스트리밍 서비스 구현 (단계별 진행 상황)
+- [ ] 세션 관리 시스템 구현
+- [ ] 에러 처리 및 복구 시스템 구현
+- [ ] Server-Sent Events 완전 구현
+- [ ] 실시간 검색 진행 상황 전송
+- [ ] 세션 생성/조회/삭제 API 구현
+- [ ] 에러 스트리밍 및 사용자 친화적 메시지
+- [ ] 세션 통계 및 모니터링
+- [ ] 자동 세션 정리 기능
+- [ ] 포괄적인 테스트 코드 작성
+
+## 🧪 테스트 방법
+
+### 1. 스트리밍 API 테스트
+```bash
+# 서버 실행
+python scripts/run_api.py
+
+# 세션 생성
+curl http://localhost:8000/api/v1/chat/session
+
+# 스트리밍 채팅 테스트
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "아이폰 15 최저가", "session_id": "your-session-id"}'
+```
+
+### 2. 세션 관리 테스트
+```bash
+# 세션 정보 조회
+curl http://localhost:8000/api/v1/chat/session/{session_id}
+
+# 세션 통계 조회
+curl http://localhost:8000/api/v1/chat/sessions/stats
+
+# 세션 삭제
+curl -X DELETE http://localhost:8000/api/v1/chat/session/{session_id}
+```
+
+### 3. 자동 테스트 실행
+```bash
+pytest tests/test_api/test_streaming_advanced.py -v
+```
+
+## 🔗 다음 단계
+[Phase 2 Step 7 - 이미지 검색 기능 구현](mdc:.cursor/rules/tasks/phase2-step7-image-search.mdc)
+
+## 📚 참고 문서
+- [개발 태스크 계획](mdc:.cursor/rules/development-task-plan.mdc)
+- [API 명세서](mdc:.cursor/rules/api-specification.mdc)
+- [기술 아키텍처](mdc:.cursor/rules/technical-architecture.mdc)
+

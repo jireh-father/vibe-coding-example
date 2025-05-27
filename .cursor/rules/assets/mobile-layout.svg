@@ -1,0 +1,24 @@
+<svg width="320" height="568" xmlns="http://www.w3.org/2000/svg">
+  <!-- 전체 배경 -->
+  <rect width="320" height="568" fill="#f8f9fa" stroke="#e9ecef"/>
+  
+  <!-- 모바일 헤더 배경 -->
+  <rect x="0" y="0" width="320" height="50" fill="#ffffff"/>
+  
+  <!-- 모바일 채팅 영역 배경 -->
+  <rect x="5" y="55" width="310" height="463" fill="#ffffff" rx="8"/>
+  
+  <!-- 모바일 입력 영역 배경 -->
+  <rect x="5" y="523" width="310" height="40" fill="#ffffff" rx="20"/>
+  
+  <!-- 버튼 배경들 -->
+  <circle cx="270" cy="543" r="12" fill="#007bff"/>
+  <circle cx="290" cy="543" r="12" fill="#28a745"/>
+  <circle cx="290" cy="25" r="12" fill="#6c757d"/>
+  
+  <!-- 헤더 텍스트 -->
+  <text x="15" y="30" font-family="Arial" font-size="16" font-weight="bold" fill="#495057">PriceFinder</text>
+  
+  <!-- 입력 영역 텍스트 -->
+  <text x="15" y="545" font-family="Arial" font-size="12" fill="#6c757d">메시지 입력...</text>
+</svg> 

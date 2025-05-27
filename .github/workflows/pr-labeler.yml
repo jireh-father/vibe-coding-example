@@ -1,0 +1,218 @@
+name: PR 자동 라벨링
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  size-label:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: PR 크기 라벨 추가
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const repo = context.repo;
+            
+            // PR의 파일 목록 가져오기
+            const response = await github.rest.pulls.listFiles({
+              owner: repo.owner,
+              repo: repo.repo,
+              pull_number: prNumber
+            });
+            
+            const files = response.data;
+            const changedLines = files.reduce((acc, file) => acc + file.additions + file.deletions, 0);
+            
+            // 현재 라벨 가져오기
+            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: prNumber
+            });
+            
+            // 크기 라벨 제거
+            const sizeLabels = ['size/XS', 'size/S', 'size/M', 'size/L', 'size/XL'];
+            for (const label of currentLabels) {
+              if (sizeLabels.includes(label.name)) {
+                await github.rest.issues.removeLabel({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: prNumber,
+                  name: label.name
+                });
+              }
+            }
+            
+            // 크기에 따라 라벨 추가
+            let sizeLabel = '';
+            if (changedLines < 50) {
+              sizeLabel = 'size/XS';
+            } else if (changedLines < 200) {
+              sizeLabel = 'size/S';
+            } else if (changedLines < 500) {
+              sizeLabel = 'size/M';
+            } else if (changedLines < 1000) {
+              sizeLabel = 'size/L';
+            } else {
+              sizeLabel = 'size/XL';
+            }
+            
+            // 라벨이 존재하는지 확인
+            try {
+              await github.rest.issues.getLabel({
+                owner: repo.owner,
+                repo: repo.repo,
+                name: sizeLabel
+              });
+            } catch (error) {
+              // 라벨이 없으면 생성
+              let color = '';
+              switch (sizeLabel) {
+                case 'size/XS': color = '2ECC71'; break; // 초록
+                case 'size/S': color = '27AE60'; break;  // 진한 초록
+                case 'size/M': color = 'F1C40F'; break;  // 노랑
+                case 'size/L': color = 'E67E22'; break;  // 주황
+                case 'size/XL': color = 'E74C3C'; break; // 빨강
+              }
+              
+              await github.rest.issues.createLabel({
+                owner: repo.owner,
+                repo: repo.repo,
+                name: sizeLabel,
+                color: color,
+                description: '변경 규모 자동 라벨'
+              });
+            }
+            
+            // 라벨 추가
+            await github.rest.issues.addLabels({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: prNumber,
+              labels: [sizeLabel]
+            });
+
+  content-label:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 콘텐츠 타입 라벨 추가
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const repo = context.repo;
+            
+            // PR의 파일 목록 가져오기
+            const response = await github.rest.pulls.listFiles({
+              owner: repo.owner,
+              repo: repo.repo,
+              pull_number: prNumber
+            });
+            
+            const files = response.data;
+            
+            // 콘텐츠 타입 라벨 정의
+            const contentLabels = {
+              'frontend': files.some(file => file.filename.startsWith('frontend/')),
+              'backend': files.some(file => file.filename.startsWith('src/api/')),
+              'agent': files.some(file => file.filename.startsWith('src/agent/')),
+              'tests': files.some(file => file.filename.startsWith('tests/')),
+              'docs': files.some(file => file.filename.endsWith('.md') || file.filename.includes('docs/')),
+              'config': files.some(file => 
+                file.filename.includes('config/') || 
+                file.filename.endsWith('.yml') || 
+                file.filename.endsWith('.yaml') || 
+                file.filename.endsWith('.ini')
+              )
+            };
+            
+            // PR 제목에서 타입 추출
+            let titleType = null;
+            const titleMatch = context.payload.pull_request.title.match(/^\[(.*?)\]/);
+            if (titleMatch && titleMatch[1]) {
+              const typeMap = {
+                'Fix': 'bug',
+                'Feature': 'feature',
+                'Refactor': 'refactor',
+                'Test': 'tests',
+                'Docs': 'docs',
+                'Chore': 'chore'
+              };
+              
+              titleType = typeMap[titleMatch[1]];
+            }
+            
+            // 적용할 라벨 목록 생성
+            const labelsToAdd = [];
+            
+            // 콘텐츠 타입 라벨 추가
+            for (const [label, shouldAdd] of Object.entries(contentLabels)) {
+              if (shouldAdd) {
+                labelsToAdd.push(label);
+              }
+            }
+            
+            // PR 제목 타입 라벨 추가
+            if (titleType) {
+              labelsToAdd.push(titleType);
+            }
+            
+            // 각 라벨이 존재하는지 확인하고 없으면 생성
+            for (const label of labelsToAdd) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  name: label
+                });
+              } catch (error) {
+                // 라벨 색상 지정
+                let color = '';
+                switch (label) {
+                  case 'frontend': color = '7FDBFF'; break; // 하늘색
+                  case 'backend': color = '0074D9'; break;  // 파란색
+                  case 'agent': color = 'B10DC9'; break;    // 보라색
+                  case 'tests': color = '2ECC40'; break;    // 초록색
+                  case 'docs': color = '01FF70'; break;     // 라임색
+                  case 'config': color = 'DDDDDD'; break;   // 회색
+                  case 'bug': color = 'FF4136'; break;      // 빨간색
+                  case 'feature': color = '3D9970'; break;  // 올리브색
+                  case 'refactor': color = 'FF851B'; break; // 주황색
+                  case 'chore': color = 'AAAAAA'; break;    // 연한 회색
+                  default: color = 'CCCCCC';
+                }
+                
+                await github.rest.issues.createLabel({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  name: label,
+                  color: color,
+                  description: '콘텐츠 타입 자동 라벨'
+                });
+              }
+            }
+            
+            // 라벨 추가
+            if (labelsToAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: prNumber,
+                labels: labelsToAdd
+              });
+            } 

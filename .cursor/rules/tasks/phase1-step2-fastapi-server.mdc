@@ -1,0 +1,446 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# 2단계: FastAPI 서버 기본 구조 구현
+
+## 🎯 목표
+API 서버 기반 구축 및 스트리밍 엔드포인트 기본 구조 구현
+
+## 📋 상세 태스크
+
+### 2.1 FastAPI 서버 메인 앱 구성
+
+#### 프로젝트 구조 확장
+```
+src/api/
+├── __init__.py
+├── main.py
+├── routers/
+│   ├── __init__.py
+│   ├── chat.py
+│   └── health.py
+├── models/
+│   ├── __init__.py
+│   ├── chat.py
+│   └── response.py
+├── services/
+│   ├── __init__.py
+│   └── streaming.py
+└── middleware/
+    ├── __init__.py
+    └── cors.py
+```
+
+#### 메인 앱 구성 (`src/api/main.py`)
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import logging
+
+from .routers import chat, health
+from .middleware.cors import setup_cors
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """앱 생명주기 관리"""
+    logger.info("PriceFinder Agent API 시작")
+    yield
+    logger.info("PriceFinder Agent API 종료")
+
+app = FastAPI(
+    title="PriceFinder Agent API",
+    description="최저가 쇼핑 Agent API - 실시간 스트리밍 지원",
+    version="0.1.0",
+    lifespan=lifespan
+)
+
+# CORS 설정
+setup_cors(app)
+
+# 라우터 등록
+app.include_router(health.router, prefix="/api/v1", tags=["health"])
+app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+
+@app.get("/")
+async def root():
+    return {
+        "message": "PriceFinder Agent API",
+        "version": "0.1.0",
+        "docs": "/docs"
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "src.api.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
+```
+
+### 2.2 `/chat` 스트리밍 엔드포인트 기본 구조
+
+#### 채팅 모델 정의 (`src/api/models/chat.py`)
+```python
+from pydantic import BaseModel, Field
+from typing import Optional, Literal
+from datetime import datetime
+
+class ChatRequest(BaseModel):
+    """채팅 요청 모델"""
+    message: str = Field(..., description="사용자 메시지")
+    session_id: str = Field(..., description="세션 ID")
+    message_type: Literal["text", "image"] = Field(default="text", description="메시지 타입")
+
+class ChatImageRequest(BaseModel):
+    """이미지 채팅 요청 모델"""
+    message: str = Field(..., description="사용자 메시지")
+    session_id: str = Field(..., description="세션 ID")
+    # 이미지는 multipart/form-data로 별도 처리
+
+class StreamEvent(BaseModel):
+    """스트리밍 이벤트 모델"""
+    type: str = Field(..., description="이벤트 타입")
+    data: dict = Field(default_factory=dict, description="이벤트 데이터")
+    timestamp: datetime = Field(default_factory=datetime.now, description="타임스탬프")
+    session_id: Optional[str] = Field(None, description="세션 ID")
+```
+
+#### 응답 모델 정의 (`src/api/models/response.py`)
+```python
+from pydantic import BaseModel, Field
+from typing import List, Optional, Any
+from datetime import datetime
+
+class ProductInfo(BaseModel):
+    """상품 정보 모델"""
+    id: str = Field(..., description="상품 ID")
+    name: str = Field(..., description="상품명")
+    image_url: Optional[str] = Field(None, description="상품 이미지 URL")
+    brand: Optional[str] = Field(None, description="브랜드")
+
+class PriceInfo(BaseModel):
+    """가격 정보 모델"""
+    shop_name: str = Field(..., description="쇼핑몰명")
+    price: int = Field(..., description="가격")
+    original_price: Optional[int] = Field(None, description="원가")
+    discount_rate: Optional[float] = Field(None, description="할인율")
+    shipping_fee: Optional[int] = Field(None, description="배송비")
+    url: str = Field(..., description="상품 URL")
+
+class SearchResult(BaseModel):
+    """검색 결과 모델"""
+    product: ProductInfo
+    prices: List[PriceInfo]
+    lowest_price: PriceInfo
+    timestamp: datetime = Field(default_factory=datetime.now)
+```
+
+#### 스트리밍 서비스 (`src/api/services/streaming.py`)
+```python
+import asyncio
+import json
+from typing import AsyncGenerator, Dict, Any
+from datetime import datetime
+
+from ..models.chat import StreamEvent
+
+class StreamingService:
+    """스트리밍 서비스 클래스"""
+    
+    @staticmethod
+    async def create_sse_response(event: StreamEvent) -> str:
+        """Server-Sent Events 형식으로 응답 생성"""
+        data = {
+            "type": event.type,
+            "data": event.data,
+            "timestamp": event.timestamp.isoformat(),
+            "session_id": event.session_id
+        }
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    
+    @staticmethod
+    async def stream_chat_response(
+        message: str, 
+        session_id: str
+    ) -> AsyncGenerator[str, None]:
+        """채팅 응답 스트리밍"""
+        
+        # 시작 이벤트
+        start_event = StreamEvent(
+            type="start",
+            data={"message": "검색을 시작합니다..."},
+            session_id=session_id
+        )
+        yield await StreamingService.create_sse_response(start_event)
+        
+        # 처리 중 이벤트 (시뮬레이션)
+        processing_event = StreamEvent(
+            type="processing",
+            data={"message": f"'{message}'를 검색하고 있습니다..."},
+            session_id=session_id
+        )
+        yield await StreamingService.create_sse_response(processing_event)
+        
+        # 시뮬레이션 지연
+        await asyncio.sleep(1)
+        
+        # 결과 이벤트 (임시 데이터)
+        result_event = StreamEvent(
+            type="result",
+            data={
+                "message": f"'{message}' 검색이 완료되었습니다.",
+                "products": [],  # TODO: 실제 검색 결과로 대체
+                "note": "실제 검색 기능은 3단계에서 구현됩니다."
+            },
+            session_id=session_id
+        )
+        yield await StreamingService.create_sse_response(result_event)
+        
+        # 완료 이벤트
+        complete_event = StreamEvent(
+            type="complete",
+            data={"message": "검색이 완료되었습니다."},
+            session_id=session_id
+        )
+        yield await StreamingService.create_sse_response(complete_event)
+```
+
+#### 채팅 라우터 (`src/api/routers/chat.py`)
+```python
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form
+from fastapi.responses import StreamingResponse
+from typing import Optional
+import uuid
+
+from ..models.chat import ChatRequest
+from ..services.streaming import StreamingService
+
+router = APIRouter()
+
+@router.post("/chat")
+async def chat_stream(request: ChatRequest):
+    """텍스트 채팅 스트리밍 엔드포인트"""
+    try:
+        return StreamingResponse(
+            StreamingService.stream_chat_response(
+                message=request.message,
+                session_id=request.session_id
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chat/image")
+async def chat_image_stream(
+    message: str = Form(...),
+    session_id: str = Form(...),
+    image: UploadFile = File(...)
+):
+    """이미지 채팅 스트리밍 엔드포인트"""
+    try:
+        # TODO: 이미지 처리 로직 구현 (7단계에서)
+        return StreamingResponse(
+            StreamingService.stream_chat_response(
+                message=f"[이미지] {message}",
+                session_id=session_id
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/chat/session")
+async def create_session():
+    """새 채팅 세션 생성"""
+    session_id = str(uuid.uuid4())
+    return {"session_id": session_id}
+```
+
+#### 헬스체크 라우터 (`src/api/routers/health.py`)
+```python
+from fastapi import APIRouter
+from datetime import datetime
+
+router = APIRouter()
+
+@router.get("/health")
+async def health_check():
+    """서버 상태 확인"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "PriceFinder Agent API"
+    }
+
+@router.get("/health/detailed")
+async def detailed_health_check():
+    """상세 서버 상태 확인"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "PriceFinder Agent API",
+        "version": "0.1.0",
+        "components": {
+            "api": "healthy",
+            "streaming": "healthy",
+            "agent": "not_implemented",  # 3단계에서 구현
+            "mcp": "not_implemented"     # 4단계에서 구현
+        }
+    }
+```
+
+#### CORS 미들웨어 (`src/api/middleware/cors.py`)
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+def setup_cors(app: FastAPI):
+    """CORS 설정"""
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # 개발 환경용, 프로덕션에서는 제한 필요
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+```
+
+### 2.3 테스트 코드 작성
+
+#### API 테스트 (`tests/test_api/test_main.py`)
+```python
+import pytest
+from fastapi.testclient import TestClient
+from src.api.main import app
+
+client = TestClient(app)
+
+def test_root():
+    """루트 엔드포인트 테스트"""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "PriceFinder Agent API" in response.json()["message"]
+
+def test_health_check():
+    """헬스체크 테스트"""
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+
+def test_create_session():
+    """세션 생성 테스트"""
+    response = client.get("/api/v1/chat/session")
+    assert response.status_code == 200
+    assert "session_id" in response.json()
+```
+
+#### 스트리밍 테스트 (`tests/test_api/test_streaming.py`)
+```python
+import pytest
+from fastapi.testclient import TestClient
+from src.api.main import app
+
+client = TestClient(app)
+
+def test_chat_stream():
+    """채팅 스트리밍 테스트"""
+    response = client.post(
+        "/api/v1/chat",
+        json={
+            "message": "아이폰 15 최저가",
+            "session_id": "test-session"
+        }
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+```
+
+### 2.4 실행 스크립트
+
+#### 개발 서버 실행 스크립트 (`scripts/run_api.py`)
+```python
+#!/usr/bin/env python3
+import uvicorn
+import os
+from pathlib import Path
+
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
+project_root = Path(__file__).parent.parent
+os.sys.path.insert(0, str(project_root))
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "src.api.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
+```
+
+## ✅ 완료 기준
+- [ ] FastAPI 서버 메인 앱 구성 완료
+- [ ] 라우터 구조 설정 (chat, health)
+- [ ] 스트리밍 엔드포인트 기본 구조 구현
+- [ ] Pydantic 모델 정의 (요청/응답)
+- [ ] Server-Sent Events 스트리밍 서비스 구현
+- [ ] CORS 미들웨어 설정
+- [ ] 기본 테스트 코드 작성
+- [ ] API 서버 실행 확인 (http://localhost:8000)
+- [ ] API 문서 확인 (http://localhost:8000/docs)
+- [ ] 스트리밍 엔드포인트 동작 확인
+
+## 🧪 테스트 방법
+
+### 1. 서버 실행
+```bash
+python scripts/run_api.py
+```
+
+### 2. API 테스트
+```bash
+# 헬스체크
+curl http://localhost:8000/api/v1/health
+
+# 세션 생성
+curl http://localhost:8000/api/v1/chat/session
+
+# 채팅 스트리밍 (터미널에서)
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "아이폰 15 최저가", "session_id": "test-session"}'
+```
+
+### 3. 자동 테스트 실행
+```bash
+pytest tests/test_api/ -v
+```
+
+## 🔗 다음 단계
+[Phase 1 Step 3 - LangGraph Agent 기본 워크플로우 구현](mdc:.cursor/rules/tasks/phase1-step3-langgraph-agent.mdc)
+
+## 📚 참고 문서
+- [개발 태스크 계획](mdc:.cursor/rules/development-task-plan.mdc)
+- [API 명세서](mdc:.cursor/rules/api-specification.mdc)
+- [기술 아키텍처](mdc:.cursor/rules/technical-architecture.mdc)

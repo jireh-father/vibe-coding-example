@@ -1,0 +1,28 @@
+# FastAPI & Server
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Streamlit UI
+streamlit
+
+# LangGraph & AI
+langgraph
+langchain-core
+langchain
+langchain-google-genai
+
+# MCP Integration
+langchain-mcp-adapters
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+httpx
+
+# Environment
+python-dotenv
+
+# Utilities
+pydantic

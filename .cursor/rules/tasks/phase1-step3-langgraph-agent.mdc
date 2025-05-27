@@ -1,0 +1,651 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# 3단계: LangGraph Agent 기본 워크플로우 구현
+
+## 🎯 목표
+AI Agent 기본 구조 구축 및 React Agent 패턴으로 상품 검색 워크플로우 구현
+
+## 📋 상세 태스크
+
+### 3.1 프로젝트 구조 확장
+
+```
+src/agent/
+├── __init__.py
+├── core.py
+├── workflows/
+│   ├── __init__.py
+│   ├── search_workflow.py
+│   └── price_comparison.py
+├── prompts/
+│   ├── __init__.py
+│   ├── system_prompts.py
+│   └── tool_prompts.py
+├── tools/
+│   ├── __init__.py
+│   ├── base_tools.py
+│   └── search_tools.py
+└── models/
+    ├── __init__.py
+    └── agent_models.py
+```
+
+### 3.2 Gemini 2.5 Flash LLM 연동
+
+#### 환경 설정 업데이트 (`.env.example`)
+```env
+# Google Gemini API
+GOOGLE_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.0-flash-exp
+
+# Agent Configuration
+AGENT_MAX_ITERATIONS=10
+AGENT_TIMEOUT=30
+```
+
+#### LLM 설정 (`src/agent/core.py`)
+```python
+import os
+from typing import Dict, Any, List, Optional
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolExecutor
+from langchain.schema import BaseMessage, HumanMessage, AIMessage
+from pydantic import BaseModel, Field
+
+class AgentState(BaseModel):
+    """Agent 상태 모델"""
+    messages: List[BaseMessage] = Field(default_factory=list)
+    user_query: str = ""
+    search_results: List[Dict[str, Any]] = Field(default_factory=list)
+    current_step: str = "start"
+    session_id: str = ""
+    error: Optional[str] = None
+
+class PriceFinderAgent:
+    """최저가 쇼핑 Agent 메인 클래스"""
+    
+    def __init__(self):
+        self.llm = self._setup_llm()
+        self.tools = self._setup_tools()
+        self.tool_executor = ToolExecutor(self.tools)
+        self.workflow = self._create_workflow()
+        self.app = self.workflow.compile()
+    
+    def _setup_llm(self) -> ChatGoogleGenerativeAI:
+        """Gemini LLM 설정"""
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY 환경변수가 설정되지 않았습니다.")
+        
+        return ChatGoogleGenerativeAI(
+            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
+            google_api_key=api_key,
+            temperature=0.1,
+            max_tokens=2048
+        )
+    
+    def _setup_tools(self) -> List:
+        """도구 설정 (4단계에서 MCP 도구로 대체 예정)"""
+        from .tools.search_tools import get_basic_tools
+        return get_basic_tools()
+    
+    def _create_workflow(self) -> StateGraph:
+        """LangGraph 워크플로우 생성"""
+        from .workflows.search_workflow import create_search_workflow
+        return create_search_workflow(self.llm, self.tool_executor)
+    
+    async def process_message(self, message: str, session_id: str) -> Dict[str, Any]:
+        """메시지 처리 메인 메서드"""
+        initial_state = AgentState(
+            messages=[HumanMessage(content=message)],
+            user_query=message,
+            session_id=session_id,
+            current_step="start"
+        )
+        
+        try:
+            result = await self.app.ainvoke(initial_state)
+            return {
+                "success": True,
+                "result": result,
+                "session_id": session_id
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "session_id": session_id
+            }
+```
+
+### 3.3 시스템 프롬프트 작성
+
+#### 시스템 프롬프트 (`src/agent/prompts/system_prompts.py`)
+```python
+SYSTEM_PROMPT = """
+당신은 최저가 쇼핑을 도와주는 전문 AI Agent입니다.
+
+## 역할과 목표
+- 사용자가 원하는 상품의 최저가를 찾아 제공
+- 여러 쇼핑몰의 가격을 비교하여 최적의 구매 옵션 제시
+- 할인 정보, 배송비, 쿠폰 등을 종합적으로 고려한 실제 결제 금액 계산
+
+## 주요 기능
+1. **상품 검색**: 사용자 요청을 분석하여 정확한 상품 식별
+2. **가격 비교**: 여러 쇼핑몰에서 동일 상품의 가격 수집 및 비교
+3. **최적 추천**: 가격, 신뢰도, 배송 조건 등을 종합하여 최적 옵션 추천
+
+## 응답 가이드라인
+- 친근하고 도움이 되는 톤으로 응답
+- 검색 과정을 단계별로 설명
+- 가격 정보는 정확하고 최신 데이터 제공
+- 구매 결정에 도움이 되는 추가 정보 제공 (리뷰, 평점, 배송 정보 등)
+
+## 도구 사용
+- 상품 검색이 필요한 경우 search_products 도구 사용
+- 가격 비교가 필요한 경우 compare_prices 도구 사용
+- 추가 정보가 필요한 경우 get_product_details 도구 사용
+
+현재 사용자의 요청을 분석하고 적절한 도구를 사용하여 최고의 쇼핑 경험을 제공하세요.
+"""
+
+SEARCH_PROMPT = """
+사용자 요청: {user_query}
+
+위 요청을 분석하여 다음을 수행하세요:
+
+1. 상품명, 브랜드, 모델, 옵션 등을 정확히 파악
+2. 검색에 필요한 키워드 추출
+3. 적절한 도구를 사용하여 상품 검색 실행
+
+검색 과정을 사용자에게 친근하게 설명하면서 진행하세요.
+"""
+
+COMPARISON_PROMPT = """
+검색된 상품들: {search_results}
+
+위 검색 결과를 바탕으로 다음을 수행하세요:
+
+1. 동일 상품 식별 및 그룹핑
+2. 가격 비교 (할인가, 배송비 포함)
+3. 최저가 및 최적 옵션 선정
+4. 사용자에게 명확하고 유용한 비교 정보 제공
+
+가격 외에도 판매자 신뢰도, 배송 조건, 리뷰 등을 종합적으로 고려하여 추천하세요.
+"""
+```
+
+#### 도구 사용 프롬프트 (`src/agent/prompts/tool_prompts.py`)
+```python
+TOOL_SELECTION_PROMPT = """
+사용자 요청: {user_query}
+현재 상황: {current_step}
+
+다음 중 적절한 도구를 선택하고 사용하세요:
+
+1. **search_products**: 상품 검색이 필요한 경우
+   - 상품명, 브랜드, 모델 등이 포함된 검색 요청
+   - 예: "아이폰 15 최저가", "삼성 세탁기 가격 비교"
+
+2. **compare_prices**: 특정 상품의 가격 비교가 필요한 경우
+   - 이미 상품이 식별되고 여러 쇼핑몰 가격 비교 필요
+   - 예: 검색 결과가 있고 가격 비교 요청
+
+3. **get_product_details**: 상품 상세 정보가 필요한 경우
+   - 리뷰, 평점, 스펙 등 추가 정보 요청
+   - 예: "리뷰 어때?", "스펙 알려줘"
+
+도구를 사용할 때는 명확한 파라미터를 제공하세요.
+"""
+
+RESPONSE_FORMAT_PROMPT = """
+검색 결과를 사용자에게 제시할 때 다음 형식을 따르세요:
+
+## 🔍 검색 결과
+
+**상품명**: {product_name}
+**검색된 쇼핑몰**: {shop_count}개
+
+### 💰 가격 비교
+
+1. **최저가** - {lowest_price_shop}
+   - 가격: {lowest_price}원
+   - 할인: {discount_info}
+   - 배송: {shipping_info}
+   - [구매하러 가기]({purchase_url})
+
+2. **두 번째** - {second_shop}
+   - 가격: {second_price}원
+   - 할인: {second_discount}
+   - 배송: {second_shipping}
+
+### 📊 추천 이유
+- {recommendation_reason}
+
+### 💡 추가 팁
+- {additional_tips}
+
+다른 옵션을 보시거나 추가 정보가 필요하시면 말씀해 주세요!
+"""
+```
+
+### 3.4 기본 도구 구현
+
+#### 기본 검색 도구 (`src/agent/tools/search_tools.py`)
+```python
+from langchain.tools import BaseTool
+from typing import List, Dict, Any
+import asyncio
+from pydantic import BaseModel, Field
+
+class SearchProductsInput(BaseModel):
+    """상품 검색 입력 모델"""
+    query: str = Field(description="검색할 상품명 또는 키워드")
+    category: str = Field(default="", description="상품 카테고리 (선택사항)")
+
+class SearchProductsTool(BaseTool):
+    """상품 검색 도구 (임시 구현)"""
+    name = "search_products"
+    description = "상품을 검색하여 여러 쇼핑몰의 가격 정보를 가져옵니다."
+    args_schema = SearchProductsInput
+    
+    def _run(self, query: str, category: str = "") -> Dict[str, Any]:
+        """동기 실행 (비추천)"""
+        return asyncio.run(self._arun(query, category))
+    
+    async def _arun(self, query: str, category: str = "") -> Dict[str, Any]:
+        """비동기 실행"""
+        # TODO: 4단계에서 실제 MCP 도구로 대체
+        # 현재는 시뮬레이션 데이터 반환
+        
+        await asyncio.sleep(1)  # 검색 시뮬레이션
+        
+        # 시뮬레이션 검색 결과
+        mock_results = {
+            "query": query,
+            "total_results": 3,
+            "products": [
+                {
+                    "id": "product_1",
+                    "name": f"{query} - 상품 1",
+                    "shop": "쿠팡",
+                    "price": 150000,
+                    "original_price": 180000,
+                    "discount_rate": 16.7,
+                    "shipping_fee": 0,
+                    "url": "https://example.com/product1",
+                    "rating": 4.5,
+                    "review_count": 1234
+                },
+                {
+                    "id": "product_2", 
+                    "name": f"{query} - 상품 2",
+                    "shop": "11번가",
+                    "price": 155000,
+                    "original_price": 180000,
+                    "discount_rate": 13.9,
+                    "shipping_fee": 2500,
+                    "url": "https://example.com/product2",
+                    "rating": 4.3,
+                    "review_count": 856
+                },
+                {
+                    "id": "product_3",
+                    "name": f"{query} - 상품 3", 
+                    "shop": "G마켓",
+                    "price": 148000,
+                    "original_price": 180000,
+                    "discount_rate": 17.8,
+                    "shipping_fee": 3000,
+                    "url": "https://example.com/product3",
+                    "rating": 4.2,
+                    "review_count": 567
+                }
+            ],
+            "search_time": "2024-01-01T12:00:00Z",
+            "note": "실제 검색 기능은 4단계 MCP 연동에서 구현됩니다."
+        }
+        
+        return mock_results
+
+class ComparePricesInput(BaseModel):
+    """가격 비교 입력 모델"""
+    products: List[Dict[str, Any]] = Field(description="비교할 상품 리스트")
+
+class ComparePricesTool(BaseTool):
+    """가격 비교 도구"""
+    name = "compare_prices"
+    description = "상품들의 가격을 비교하여 최적의 구매 옵션을 제시합니다."
+    args_schema = ComparePricesInput
+    
+    def _run(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """동기 실행"""
+        return asyncio.run(self._arun(products))
+    
+    async def _arun(self, products: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """비동기 실행"""
+        if not products:
+            return {"error": "비교할 상품이 없습니다."}
+        
+        # 실제 결제 금액 계산 (가격 + 배송비)
+        for product in products:
+            product["total_price"] = product["price"] + product.get("shipping_fee", 0)
+        
+        # 최저가 순으로 정렬
+        sorted_products = sorted(products, key=lambda x: x["total_price"])
+        
+        comparison_result = {
+            "total_products": len(products),
+            "lowest_price": sorted_products[0],
+            "highest_price": sorted_products[-1],
+            "price_difference": sorted_products[-1]["total_price"] - sorted_products[0]["total_price"],
+            "sorted_products": sorted_products,
+            "recommendation": {
+                "best_value": sorted_products[0],
+                "reason": f"총 {len(products)}개 옵션 중 배송비 포함 최저가"
+            }
+        }
+        
+        return comparison_result
+
+def get_basic_tools() -> List[BaseTool]:
+    """기본 도구 리스트 반환"""
+    return [
+        SearchProductsTool(),
+        ComparePricesTool()
+    ]
+```
+
+### 3.5 LangGraph 워크플로우 구현
+
+#### 검색 워크플로우 (`src/agent/workflows/search_workflow.py`)
+```python
+from typing import Dict, Any
+from langchain.schema import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolExecutor
+from langchain_core.language_models import BaseChatModel
+
+from ..models.agent_models import AgentState
+from ..prompts.system_prompts import SYSTEM_PROMPT, SEARCH_PROMPT
+
+def should_continue(state: AgentState) -> str:
+    """다음 단계 결정"""
+    messages = state.messages
+    last_message = messages[-1]
+    
+    # AI 메시지에 tool_calls가 있으면 도구 실행
+    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+        return "call_tool"
+    
+    # 에러가 있으면 종료
+    if state.error:
+        return END
+    
+    # 검색 결과가 있으면 종료
+    if state.search_results:
+        return END
+    
+    # 기본적으로 종료
+    return END
+
+def call_model(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
+    """LLM 호출"""
+    messages = state.messages
+    
+    # 시스템 메시지 추가
+    if not messages or not isinstance(messages[0], SystemMessage):
+        messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
+    
+    response = llm.invoke(messages)
+    
+    return {
+        "messages": messages + [response],
+        "current_step": "model_response"
+    }
+
+def call_tool(state: AgentState, tool_executor: ToolExecutor) -> Dict[str, Any]:
+    """도구 실행"""
+    messages = state.messages
+    last_message = messages[-1]
+    
+    # 도구 실행
+    tool_calls = last_message.tool_calls
+    results = []
+    
+    for tool_call in tool_calls:
+        result = tool_executor.invoke(tool_call)
+        results.append(result)
+    
+    # 검색 결과 저장
+    search_results = []
+    for result in results:
+        if isinstance(result, dict) and "products" in result:
+            search_results.extend(result["products"])
+    
+    # 도구 실행 결과를 메시지로 추가
+    tool_messages = [
+        AIMessage(content=f"도구 실행 결과: {result}")
+        for result in results
+    ]
+    
+    return {
+        "messages": messages + tool_messages,
+        "search_results": search_results,
+        "current_step": "tool_executed"
+    }
+
+def create_search_workflow(llm: BaseChatModel, tool_executor: ToolExecutor) -> StateGraph:
+    """검색 워크플로우 생성"""
+    
+    workflow = StateGraph(AgentState)
+    
+    # 노드 추가
+    workflow.add_node("agent", lambda state: call_model(state, llm))
+    workflow.add_node("action", lambda state: call_tool(state, tool_executor))
+    
+    # 시작점 설정
+    workflow.set_entry_point("agent")
+    
+    # 조건부 엣지 추가
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            "call_tool": "action",
+            END: END
+        }
+    )
+    
+    # 액션 후 다시 에이전트로
+    workflow.add_edge("action", "agent")
+    
+    return workflow
+```
+
+#### Agent 모델 (`src/agent/models/agent_models.py`)
+```python
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field
+from langchain.schema import BaseMessage
+
+class AgentState(BaseModel):
+    """Agent 상태 모델"""
+    messages: List[BaseMessage] = Field(default_factory=list)
+    user_query: str = ""
+    search_results: List[Dict[str, Any]] = Field(default_factory=list)
+    current_step: str = "start"
+    session_id: str = ""
+    error: Optional[str] = None
+    
+    class Config:
+        arbitrary_types_allowed = True
+```
+
+### 3.6 API 연동 업데이트
+
+#### 스트리밍 서비스 업데이트 (`src/api/services/streaming.py`)
+```python
+import asyncio
+import json
+from typing import AsyncGenerator, Dict, Any
+from datetime import datetime
+
+from ..models.chat import StreamEvent
+from ...agent.core import PriceFinderAgent
+
+class StreamingService:
+    """스트리밍 서비스 클래스"""
+    
+    def __init__(self):
+        self.agent = PriceFinderAgent()
+    
+    @staticmethod
+    async def create_sse_response(event: StreamEvent) -> str:
+        """Server-Sent Events 형식으로 응답 생성"""
+        data = {
+            "type": event.type,
+            "data": event.data,
+            "timestamp": event.timestamp.isoformat(),
+            "session_id": event.session_id
+        }
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    
+    async def stream_chat_response(
+        self, 
+        message: str, 
+        session_id: str
+    ) -> AsyncGenerator[str, None]:
+        """Agent를 사용한 채팅 응답 스트리밍"""
+        
+        # 시작 이벤트
+        start_event = StreamEvent(
+            type="start",
+            data={"message": "AI Agent가 요청을 처리하고 있습니다..."},
+            session_id=session_id
+        )
+        yield await self.create_sse_response(start_event)
+        
+        try:
+            # Agent 실행
+            result = await self.agent.process_message(message, session_id)
+            
+            if result["success"]:
+                # 성공 결과 스트리밍
+                result_event = StreamEvent(
+                    type="agent_result",
+                    data=result["result"],
+                    session_id=session_id
+                )
+                yield await self.create_sse_response(result_event)
+            else:
+                # 에러 결과 스트리밍
+                error_event = StreamEvent(
+                    type="error",
+                    data={"error": result["error"]},
+                    session_id=session_id
+                )
+                yield await self.create_sse_response(error_event)
+        
+        except Exception as e:
+            # 예외 처리
+            error_event = StreamEvent(
+                type="error",
+                data={"error": str(e)},
+                session_id=session_id
+            )
+            yield await self.create_sse_response(error_event)
+        
+        # 완료 이벤트
+        complete_event = StreamEvent(
+            type="complete",
+            data={"message": "처리가 완료되었습니다."},
+            session_id=session_id
+        )
+        yield await self.create_sse_response(complete_event)
+```
+
+### 3.7 테스트 코드 작성
+
+#### Agent 테스트 (`tests/test_agent/test_core.py`)
+```python
+import pytest
+import asyncio
+from src.agent.core import PriceFinderAgent
+
+@pytest.fixture
+def agent():
+    """Agent 인스턴스 생성"""
+    return PriceFinderAgent()
+
+@pytest.mark.asyncio
+async def test_agent_initialization(agent):
+    """Agent 초기화 테스트"""
+    assert agent.llm is not None
+    assert agent.tools is not None
+    assert agent.app is not None
+
+@pytest.mark.asyncio
+async def test_process_message(agent):
+    """메시지 처리 테스트"""
+    result = await agent.process_message("아이폰 15 최저가", "test-session")
+    
+    assert "success" in result
+    assert "session_id" in result
+    assert result["session_id"] == "test-session"
+
+@pytest.mark.asyncio
+async def test_search_workflow(agent):
+    """검색 워크플로우 테스트"""
+    result = await agent.process_message("삼성 갤럭시 S24 가격 비교", "test-session")
+    
+    # 성공적으로 처리되었는지 확인
+    assert result["success"] is True or "error" in result
+```
+
+## ✅ 완료 기준
+- [ ] Gemini 2.5 Flash LLM 연동 완료
+- [ ] LangGraph Agent 기본 구조 구현
+- [ ] React Agent 패턴 워크플로우 구현
+- [ ] 시스템 프롬프트 작성 (상품 매칭, 가격 정보 정리, 가격 비교)
+- [ ] 기본 도구 구현 (임시 검색, 가격 비교)
+- [ ] API와 Agent 연동 완료
+- [ ] 스트리밍 응답에 Agent 결과 포함
+- [ ] Agent 테스트 코드 작성
+- [ ] 전체 워크플로우 동작 확인
+
+## 🧪 테스트 방법
+
+### 1. 환경 변수 설정
+```bash
+export GOOGLE_API_KEY="your_gemini_api_key"
+```
+
+### 2. Agent 단독 테스트
+```bash
+pytest tests/test_agent/ -v
+```
+
+### 3. API를 통한 Agent 테스트
+```bash
+# 서버 실행
+python scripts/run_api.py
+
+# 채팅 테스트
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "아이폰 15 최저가 찾아줘", "session_id": "test-session"}'
+```
+
+## 🔗 다음 단계
+[Phase 1 Step 4 - MCP 연동](mdc:.cursor/rules/tasks/phase1-step4-mcp-integration.mdc)
+
+## 📚 참고 문서
+- [개발 태스크 계획](mdc:.cursor/rules/development-task-plan.mdc)
+- [기술 아키텍처](mdc:.cursor/rules/technical-architecture.mdc)
+- [제품 요구사항](mdc:.cursor/rules/product-requirements-document.mdc)
+

@@ -1,0 +1,240 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 1단계: 프로젝트 기본 구조 설정
+
+## 🎯 목표
+개발 환경 초기 구성 및 프로젝트 기반 구조 설정
+
+## 📋 상세 태스크
+
+### 1.1 Python 프로젝트 초기 설정
+- **Python 가상환경 생성**
+  ```bash
+  python -m venv venv
+  source venv/bin/activate  # Linux/Mac
+  venv\Scripts\activate     # Windows
+  ```
+
+### 1.2 기본 개발 원칙 룰 작성
+- 프로젝트 디렉토리 구조 작성
+- 개발 원칙
+  - TDD 기반, 테스트 코드 먼저 작성
+  - SOLID 원칙
+  - Clean Architecture
+
+### 1.3 requirements.txt 의존성 관리 작성
+```txt
+# FastAPI & Server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Streamlit UI
+streamlit==1.28.1
+
+# LangGraph & AI
+langgraph==0.0.62
+langchain==0.1.0
+langchain-google-genai==1.0.1
+
+# MCP Integration
+langchain-mcp-adapters==0.1.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+
+# Environment
+python-dotenv==1.0.0
+
+# Utilities
+pydantic==2.5.0
+```
+
+### 1.4 기본 Skeleton 코드 구성
+
+#### FastAPI 서버 기본 구조 (`src/api/main.py`)
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(
+    title="PriceFinder Agent API",
+    description="최저가 쇼핑 Agent API",
+    version="0.1.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+async def root():
+    return {"message": "PriceFinder Agent API"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+#### Streamlit UI 기본 구조 (`src/ui/streamlit_app.py`)
+```python
+import streamlit as st
+
+st.set_page_config(
+    page_title="PriceFinder Agent",
+    page_icon="🛒",
+    layout="wide"
+)
+
+st.title("🛒 PriceFinder Agent")
+st.write("최저가 쇼핑 AI Agent")
+
+# 기본 채팅 인터페이스 placeholder
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# 메시지 표시
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 사용자 입력
+if prompt := st.chat_input("상품을 검색해보세요..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # TODO: Agent 연동
+    with st.chat_message("assistant"):
+        response = f"'{prompt}'에 대한 검색 기능은 아직 구현 중입니다."
+        st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
+```
+
+#### Agent 기본 구조 (`src/agent/core.py`)
+```python
+from typing import Dict, Any
+
+class PriceFinderAgent:
+    """최저가 쇼핑 Agent 기본 클래스"""
+    
+    def __init__(self):
+        self.session_state = {}
+    
+    async def process_message(self, message: str, session_id: str) -> Dict[str, Any]:
+        """메시지 처리 기본 메서드"""
+        return {
+            "response": f"메시지 '{message}' 처리 중... (구현 예정)",
+            "session_id": session_id
+        }
+    
+    async def search_products(self, query: str) -> Dict[str, Any]:
+        """상품 검색 기본 메서드"""
+        return {
+            "products": [],
+            "message": f"'{query}' 상품 검색 기능 구현 예정"
+        }
+```
+
+### 1.5 TDD 설정
+
+#### pytest 설정 (`pytest.ini`)
+```ini
+[tool:pytest]
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+addopts = -v --tb=short
+asyncio_mode = auto
+```
+
+#### 기본 테스트 파일들
+- `tests/test_api/test_main.py`: FastAPI 테스트
+- `tests/test_agent/test_core.py`: Agent 테스트
+- `tests/test_ui/test_streamlit.py`: UI 테스트
+
+### 1.6 Git 설정
+
+#### .gitignore
+```
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Environment Variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Streamlit
+.streamlit/
+```
+
+### 1.7 환경 변수 설정 (`.env.example`)
+```
+# API Configuration
+API_HOST=localhost
+API_PORT=8000
+
+# Google Gemini API
+GOOGLE_API_KEY=your_gemini_api_key_here
+
+# Development
+DEBUG=true
+LOG_LEVEL=INFO
+```

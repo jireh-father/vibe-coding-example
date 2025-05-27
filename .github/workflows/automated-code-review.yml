@@ -1,0 +1,311 @@
+name: 자동 코드 리뷰
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '**.py'
+      - '**.js'
+      - '**.jsx'
+      - '**.ts'
+      - '**.tsx'
+      - '**.css'
+      - '**.html'
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort pylint
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          
+      - name: Flake8 실행
+        run: |
+          flake8 src frontend tests --count --select=E9,F63,F7,F82 --show-source --statistics
+        continue-on-error: true
+          
+      - name: Pylint 실행
+        id: pylint
+        run: |
+          pylint --output-format=text --disable=C0111,R0903 --fail-under=7.0 src frontend tests > pylint_results.txt || true
+          cat pylint_results.txt
+          echo "score=$(grep -oP '(?<=rated at ).*(?=/10)' pylint_results.txt || echo '0.0')" >> $GITHUB_OUTPUT
+          
+      - name: Black 검사
+        id: black
+        run: |
+          black --check --diff src frontend tests > black_results.txt || true
+          cat black_results.txt
+          
+      - name: 코드 리뷰 코멘트 작성
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const prNumber = context.payload.pull_request.number;
+            const repo = context.repo;
+            
+            // Pylint 결과 읽기
+            let pylintScore = '${{ steps.pylint.outputs.score }}';
+            if (!pylintScore) pylintScore = '0.0';
+            
+            let pylintEmoji = '';
+            if (parseFloat(pylintScore) >= 9.0) {
+              pylintEmoji = '🟢';
+            } else if (parseFloat(pylintScore) >= 7.0) {
+              pylintEmoji = '🟡';
+            } else {
+              pylintEmoji = '🔴';
+            }
+            
+            // Black 결과 읽기
+            let blackResults = '';
+            try {
+              blackResults = fs.readFileSync('black_results.txt', 'utf8').trim();
+            } catch (error) {
+              blackResults = 'Black 결과를 읽을 수 없습니다.';
+            }
+            
+            const hasBlackIssues = blackResults.includes('would reformat');
+            const blackEmoji = hasBlackIssues ? '🔴' : '🟢';
+            
+            // Flake8 결과는 에러가 있을 경우만 표시
+            
+            // 코드 변경 분석
+            const response = await github.rest.pulls.listFiles({
+              owner: repo.owner,
+              repo: repo.repo,
+              pull_number: prNumber
+            });
+            
+            const files = response.data;
+            
+            // 복잡도 측정 (임시 지표: 파일당 변경 줄 수)
+            const avgChangesPerFile = files.reduce((acc, file) => acc + file.additions + file.deletions, 0) / files.length;
+            
+            // 코드 품질 종합 점수 (10점 만점, 임시 산출식)
+            const qualityScore = Math.min(10, Math.max(0, parseFloat(pylintScore) * 0.7 + (hasBlackIssues ? 0 : 3)));
+            
+            // 코드 리뷰 생성
+            const comment = `## 🤖 자동 코드 리뷰 결과
+            
+            ### 코드 품질 분석
+            
+            | 검사 도구 | 결과 | 점수 |
+            | --------- | ---- | ---- |
+            | Pylint | ${pylintEmoji} | ${pylintScore}/10 |
+            | Black 포맷팅 | ${blackEmoji} | ${hasBlackIssues ? '포맷팅 필요' : '통과'} |
+            | 코드 복잡도 | ${avgChangesPerFile > 100 ? '🔴' : avgChangesPerFile > 50 ? '🟡' : '🟢'} | 평균 ${Math.round(avgChangesPerFile)}줄/파일 |
+            | **종합 점수** | ${qualityScore >= 8 ? '🟢' : qualityScore >= 6 ? '🟡' : '🔴'} | **${qualityScore.toFixed(1)}/10** |
+            
+            ### 개선 제안
+            
+            ${parseFloat(pylintScore) < 7.0 ? '- Pylint 점수가 낮습니다. 코드 품질을 개선해 주세요.\n' : ''}
+            ${hasBlackIssues ? '- Black 포맷팅 규칙을 따르지 않았습니다. `black` 실행을 통해 코드 포맷을 정리해 주세요.\n' : ''}
+            ${avgChangesPerFile > 100 ? '- 파일당 변경 사항이 많습니다. 더 작은 단위로 분리하는 것이 좋습니다.\n' : ''}
+            
+            ### 코드 스타일 가이드
+            - 함수와 클래스에 적절한 문서화(docstring) 추가
+            - 변수명과 함수명은 의미를 명확히 표현
+            - 한 함수는 한 가지 작업만 수행하도록 구성
+            - 반복되는 코드는 함수로 추출하여 재사용
+            
+            > 이 코드 리뷰는 자동화 도구를 통해 생성되었으며, 실제 코드 품질과 차이가 있을 수 있습니다.`;
+            
+            await github.rest.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: prNumber,
+              body: comment
+            });
+
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+          
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+          
+      - name: Bandit 보안 검사
+        id: bandit
+        run: |
+          bandit -r src frontend -f txt -o bandit_results.txt || true
+          cat bandit_results.txt
+          
+      - name: 의존성 보안 검사
+        id: safety
+        run: |
+          safety check -r requirements.txt --json > safety_results.json || true
+          cat safety_results.json
+          
+      - name: 보안 검사 결과 코멘트
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const prNumber = context.payload.pull_request.number;
+            const repo = context.repo;
+            
+            // Bandit 결과 읽기
+            let banditResults = '';
+            let banditIssues = 0;
+            try {
+              banditResults = fs.readFileSync('bandit_results.txt', 'utf8').trim();
+              const issuesMatch = banditResults.match(/Found (\d+) issues/);
+              if (issuesMatch) {
+                banditIssues = parseInt(issuesMatch[1]);
+              }
+            } catch (error) {
+              banditResults = 'Bandit 결과를 읽을 수 없습니다.';
+            }
+            
+            // Safety 결과 읽기
+            let safetyIssues = 0;
+            try {
+              const safetyData = fs.readFileSync('safety_results.json', 'utf8').trim();
+              if (safetyData) {
+                try {
+                  const safetyJson = JSON.parse(safetyData);
+                  if (safetyJson && Array.isArray(safetyJson.vulnerabilities)) {
+                    safetyIssues = safetyJson.vulnerabilities.length;
+                  }
+                } catch (e) {
+                  console.error('Safety JSON 파싱 오류:', e);
+                }
+              }
+            } catch (error) {
+              console.error('Safety 결과 읽기 오류:', error);
+            }
+            
+            // 보안 점수 계산 (10점 만점)
+            const securityScore = Math.max(0, 10 - banditIssues - safetyIssues);
+            
+            const comment = `## 🔒 보안 검사 결과
+            
+            | 검사 도구 | 발견된 이슈 | 심각도 |
+            | --------- | ----------- | ------ |
+            | Bandit (코드 보안) | ${banditIssues} | ${banditIssues > 5 ? '🔴 높음' : banditIssues > 0 ? '🟡 중간' : '🟢 없음'} |
+            | Safety (의존성 보안) | ${safetyIssues} | ${safetyIssues > 3 ? '🔴 높음' : safetyIssues > 0 ? '🟡 중간' : '🟢 없음'} |
+            | **보안 점수** | ${securityScore}/10 | ${securityScore >= 8 ? '🟢 안전' : securityScore >= 5 ? '🟡 주의' : '🔴 위험'} |
+            
+            ${banditIssues > 0 || safetyIssues > 0 ? '### 주요 보안 이슈\n\n' : '### 보안 이슈 없음 ✅\n\n안전한 코드입니다. 좋은 작업입니다! 👍\n\n'}
+            ${banditIssues > 0 ? '- Bandit 검사에서 보안 이슈가 발견되었습니다. 자세한 내용은 워크플로우 로그를 확인해 주세요.\n' : ''}
+            ${safetyIssues > 0 ? '- 취약한 의존성이 발견되었습니다. 패키지 버전을 업데이트해 주세요.\n' : ''}
+            
+            ### 보안 체크리스트
+            - 사용자 입력 검증
+            - SQL 인젝션 방지 (매개변수화된 쿼리 사용)
+            - 안전한 비밀번호 저장 (해싱 사용)
+            - 적절한 에러 처리 및 로깅
+            - 최신 보안 패치 적용
+            
+            > 이 보안 검사는 자동화 도구를 통해 생성되었으며, 모든 보안 취약점을 발견하지 못할 수 있습니다.`;
+            
+            await github.rest.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: prNumber,
+              body: comment
+            });
+
+  test-coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+          
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          
+      - name: 테스트 실행 및 커버리지 측정
+        id: coverage
+        run: |
+          pytest --cov=src --cov=frontend --cov-report=xml --cov-report=term || true
+          echo "total=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(root.attrib['line-rate'])")" >> $GITHUB_OUTPUT
+          
+      - name: 커버리지 결과 코멘트
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const repo = context.repo;
+            
+            // 커버리지 계산
+            let coverage = parseFloat('${{ steps.coverage.outputs.total }}') * 100 || 0;
+            
+            let coverageEmoji = '';
+            if (coverage >= 80) {
+              coverageEmoji = '🟢';
+            } else if (coverage >= 50) {
+              coverageEmoji = '🟡';
+            } else {
+              coverageEmoji = '🔴';
+            }
+            
+            const comment = `## 📊 테스트 커버리지 분석
+            
+            | 지표 | 결과 | 상태 |
+            | ---- | ---- | ---- |
+            | 라인 커버리지 | ${coverage.toFixed(2)}% | ${coverageEmoji} |
+            | 목표 커버리지 | 80.00% | ${coverage >= 80 ? '✅' : '❌'} |
+            
+            ${coverage < 80 ? `### 개선 필요 사항\n\n- 현재 테스트 커버리지가 목표(80%)보다 낮습니다.\n- 중요 기능에 대한 테스트 케이스를 추가해 주세요.\n- 특히 복잡한 로직과 예외 처리에 대한 테스트가 필요합니다.` : `### 훌륭한 테스트 커버리지 👍\n\n목표 커버리지를 달성했습니다! 좋은 작업입니다.`}
+            
+            ### 테스트 모범 사례
+            - 모든 비즈니스 로직에 단위 테스트 작성
+            - 예외 상황과 엣지 케이스 테스트
+            - 통합 테스트로 컴포넌트 간 상호작용 검증
+            - 테스트는 독립적이고 반복 가능하게 작성
+            
+            > 테스트 커버리지는 코드 품질의 한 지표일 뿐이며, 테스트의 질적인 부분도 중요합니다.`;
+            
+            await github.rest.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: prNumber,
+              body: comment
+            }); 

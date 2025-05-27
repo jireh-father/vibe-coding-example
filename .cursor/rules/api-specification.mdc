@@ -1,0 +1,132 @@
+---
+description: api specification
+globs: 
+alwaysApply: false
+---
+# 최저가 쇼핑 Agent - API 명세서
+
+## 📋 API 개요
+
+이 문서는 [product-requirements-document.mdc](mdc:.cursor/rules/product-requirements-document.mdc)와 [technical-architecture.mdc](mdc:.cursor/rules/technical-architecture.mdc)를 기반으로 한 FastAPI 서버의 REST API 명세입니다.
+
+## 🔗 Base URL
+```
+http://localhost:8000/api/v1
+```
+
+## 🛠️ 핵심 API 엔드포인트
+
+### 챗봇 대화 API (Streaming)
+
+#### POST /chat
+LangGraph Agent와의 대화형 상호작용 (Server-Sent Events 스트리밍)
+
+**Request:**
+```json
+{
+  "message": "아이폰 15 최저가 찾아줘",
+  "session_id": "uuid",
+  "message_type": "text"
+}
+```
+
+**Response Headers:**
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+```
+
+**Streaming Response:**
+- 아직 확정되지 않았으며 개발 중 변경될 수 있습니다.
+```
+data: {"type": "start", "session_id": "uuid", "timestamp": "2024-01-01T00:00:00Z"}
+
+data: {"type": "message", "content": "아이폰 15를 검색하고 있습니다... 🔍", "timestamp": "2024-01-01T00:00:01Z"}
+
+data: {"type": "action", "action": "search_products", "status": "processing", "timestamp": "2024-01-01T00:00:02Z"}
+
+data: {"type": "products", "data": [{"id": "uuid", "name": "아이폰 15 Pro 256GB", "prices": [{"shop": "coupang", "price": 1350000, "url": "https://..."}]}], "timestamp": "2024-01-01T00:00:05Z"}
+
+data: {"type": "message", "content": "총 5개 쇼핑몰에서 아이폰 15를 찾았습니다. 최저가는 쿠팡에서 135만원입니다!", "timestamp": "2024-01-01T00:00:06Z"}
+
+data: {"type": "complete", "session_id": "uuid", "timestamp": "2024-01-01T00:00:07Z"}
+```
+
+#### POST /chat/image
+이미지가 포함된 챗봇 대화 (Streaming)
+
+**Request:**
+```
+Content-Type: multipart/form-data
+- message: "이 상품 최저가 찾아줘"
+- image: [이미지 파일]
+- session_id: "uuid"
+```
+
+**Streaming Response:**
+- 아직 확정되지 않았으며 개발 중 변경될 수 있습니다.
+```
+data: {"type": "start", "session_id": "uuid", "timestamp": "2024-01-01T00:00:00Z"}
+
+data: {"type": "message", "content": "이미지를 분석하고 있습니다... 📸", "timestamp": "2024-01-01T00:00:01Z"}
+
+data: {"type": "action", "action": "image_analysis", "status": "processing", "timestamp": "2024-01-01T00:00:02Z"}
+
+data: {"type": "image_result", "identified_product": "아이폰 15 Pro", "confidence": 0.95, "timestamp": "2024-01-01T00:00:04Z"}
+
+data: {"type": "message", "content": "아이폰 15 Pro로 인식되었습니다. 가격을 검색하고 있습니다...", "timestamp": "2024-01-01T00:00:05Z"}
+
+data: {"type": "products", "data": [...], "timestamp": "2024-01-01T00:00:08Z"}
+
+data: {"type": "complete", "session_id": "uuid", "timestamp": "2024-01-01T00:00:09Z"}
+```
+
+## 🔧 스트리밍 이벤트 타입
+- 아직 확정되지 않았으며 개발 중 변경될 수 있습니다.
+### 기본 이벤트
+| 타입 | 설명 | 데이터 |
+|------|------|--------|
+| `start` | 스트림 시작 | `session_id`, `timestamp` |
+| `message` | 텍스트 메시지 | `content`, `timestamp` |
+| `complete` | 스트림 완료 | `session_id`, `timestamp` |
+| `error` | 에러 발생 | `error_code`, `message`, `timestamp` |
+
+### 액션 이벤트
+| 타입 | 설명 | 데이터 |
+|------|------|--------|
+| `action` | 액션 실행 상태 | `action`, `status`, `timestamp` |
+| `products` | 상품 검색 결과 | `data[]`, `timestamp` |
+| `price_comparison` | 가격 비교 결과 | `data[]`, `timestamp` |
+| `image_result` | 이미지 분석 결과 | `identified_product`, `confidence`, `timestamp` |
+
+
+## 🎯 에러 스트리밍
+
+에러 발생 시 스트림을 통해 에러 정보 전송:
+
+```
+data: {"type": "error", "error_code": "PRODUCT_NOT_FOUND", "message": "상품을 찾을 수 없습니다.", "timestamp": "2024-01-01T00:00:00Z"}
+```
+
+## 💡 클라이언트 구현 예시
+
+
+### Python (Streamlit)
+```python
+import requests
+import json
+
+def stream_chat(message, session_id):
+    response = requests.post(
+        '/api/v1/chat',
+        json={'message': message, 'session_id': session_id},
+        stream=True,
+    )
+    
+    for line in response.iter_lines():
+        if line.startswith(b'data: '):
+            data = json.loads(line[6:])
+            yield data
+
+```

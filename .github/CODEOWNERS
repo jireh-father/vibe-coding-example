@@ -1,0 +1,27 @@
+# 이 파일은 GitHub의 코드 오너 기능을 설정합니다
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# 기본 오너
+* @team-lead
+
+# 프론트엔드 코드
+/frontend/ @frontend-lead @ui-team
+
+# 백엔드 API
+/src/api/ @backend-lead @api-team
+
+# AI 에이전트
+/src/agent/ @ai-lead @agent-team
+
+# 테스트
+/tests/ @qa-lead @test-team
+
+# 설정 파일
+*.yml @devops-lead
+*.yaml @devops-lead
+*.json @devops-lead
+*.ini @devops-lead
+
+# 문서
+*.md @docs-team
+/docs/ @docs-team 
