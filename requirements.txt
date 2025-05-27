@@ -1,28 +1,28 @@
 # FastAPI & Server
-fastapi
-uvicorn[standard]
-python-multipart
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
 
 # Streamlit UI
-streamlit
+streamlit==1.45.1
 
 # LangGraph & AI
-langgraph
-langchain-core
-langchain
-langchain-google-genai
+langgraph==0.4.7
+langchain-core==0.3.61
+langchain==0.3.25
+langchain-google-genai==2.1.4
 
 # MCP Integration
-langchain-mcp-adapters
+langchain-mcp-adapters==0.1.1
 
 # Testing
-pytest
-pytest-asyncio
-pytest-cov
-httpx
+pytest==8.3.5
+pytest-asyncio==1.0.0
+pytest-cov==6.1.1
+httpx==0.28.1
 
 # Environment
-python-dotenv
+python-dotenv==1.1.0
 
 # Utilities
-pydantic
+pydantic==2.11.5
