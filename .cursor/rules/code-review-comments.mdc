@@ -1,6 +1,6 @@
 ---
-description:
-globs:
+description: code review comments
+globs: 
 alwaysApply: false
 ---
 # 코드 리뷰 코멘트 가이드라인
