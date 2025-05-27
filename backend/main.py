@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .routers.chat import router as chat_router
+
 app = FastAPI(
     title="PriceFinder Agent API",
     description="최저가 쇼핑 Agent API",
@@ -14,6 +16,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 라우터 등록
+app.include_router(chat_router)
 
 @app.get("/")
 async def root():

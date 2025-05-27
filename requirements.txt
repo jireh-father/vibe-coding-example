@@ -2,6 +2,7 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 python-multipart==0.0.20
+sse-starlette==2.0.0
 
 # Streamlit UI
 streamlit==1.45.1

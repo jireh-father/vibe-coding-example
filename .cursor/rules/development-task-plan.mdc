@@ -33,7 +33,7 @@ alwaysApply: false
 #### 3단계: LangGraph Agent 기본 워크플로우 구현
 **목표**: AI Agent 기본 구조 구축
 - React Agent 구현
-- 프롬프트 작성(상품 매칭, 가격 정보 정리, 가격 비교, 툴 사용) 
+- 프롬프트 작성(특정 상품의 최저가 리스트를 찾기 위한 상품 매칭, 가격 정보 정리, 가격 비교, 툴 사용) 
 - Gemini 2.5 Flash LLM 연동
 
 #### 4단계: MCP 연동
