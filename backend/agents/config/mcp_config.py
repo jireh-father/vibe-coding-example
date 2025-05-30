@@ -3,12 +3,19 @@ MCP 서버 설정
 기존 MCP 서버들을 활용한 설정
 """
 import os
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
+
+# 환경 변수에서 키 가져오기
+SMITHERY_API_KEY = os.getenv("SMITHERY_API_KEY")
 
 # 기본 MCP 서버 설정
 MCP_SERVER_CONFIG = {
     "exa": {
         "transport": "streamable_http",
-        "url": "https://server.smithery.ai/exa/mcp?api_key=4a07c2ce-0e95-4d1c-a2bc-1c4ab2a30ce1"
+        "url": f"https://server.smithery.ai/exa/mcp?api_key={SMITHERY_API_KEY}"
     },
     # "browser": {
     #     "command": "npx", 
