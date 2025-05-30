@@ -31,5 +31,4 @@ class StreamingEvent(BaseModel):
     event_type: Literal["message", "products", "error", "thinking", "search"] = Field(
         ..., description="이벤트 타입"
     )
-    data: str = Field(..., description="이벤트 데이터")
-    session_id: str = Field(..., description="세션 ID") 
+    data: str = Field(..., description="이벤트 데이터") 

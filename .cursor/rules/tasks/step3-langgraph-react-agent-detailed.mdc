@@ -1,0 +1,403 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 3단계: LangGraph React Agent 기본 워크플로우 구현
+
+## 🎯 목표
+- **LangGraph의 create_react_agent** 라이브러리 활용
+- **langchain-mcp-adapters**를 통한 기존 MCP 서버 연동
+- **Gemini 2.5 Flash LLM** 연동
+- **최저가 쇼핑 전용 프롬프트** 작성
+
+## 📋 개발 순서 (TDD 기반)
+
+### 1. 테스트 코드 작성 (Red)
+```python
+# tests/test_backend/test_agents/test_shopping_agent.py
+```
+
+### 2. create_react_agent + MCP Adapters 구현 (Green)
+```python
+# backend/agents/shopping_agent.py
+# backend/agents/prompts/shopping_prompts.py
+```
+
+### 3. 기존 MCP 서버 연동 (Green)
+```python
+# backend/agents/config/mcp_config.py
+```
+
+### 4. 리팩토링 및 최적화 (Refactor)
+
+### 5. Pylint 검사 및 수정
+
+## 🔧 구현 세부사항
+
+### A. langchain-mcp-adapters 기반 구조
+
+#### 1. 의존성 설치
+```bash
+pip install langchain-mcp-adapters langgraph "langchain[google-genai]"
+```
+
+#### 2. 기존 MCP 서버 활용
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# Gemini 2.5 Flash 모델 초기화
+model = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash-exp",
+    temperature=0.1
+)
+
+# 기존 MCP 서버들 연동
+client = MultiServerMCPClient({
+    "web_search": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-web-search"],
+        "transport": "stdio",
+        "env": {
+            "BRAVE_API_KEY": "your-brave-api-key"  # 또는 다른 검색 API
+        }
+    },
+    "browser": {
+        "command": "npx", 
+        "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+        "transport": "stdio",
+    },
+    "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+        "transport": "stdio",
+    }
+})
+
+# MCP 도구 로드
+tools = await client.get_tools()
+
+# React Agent 생성
+agent = create_react_agent(
+    model=model,
+    tools=tools,
+    prompt=SHOPPING_SYSTEM_PROMPT
+)
+```
+
+#### 3. 최저가 쇼핑 전용 프롬프트
+```python
+SHOPPING_SYSTEM_PROMPT = """
+당신은 최저가 쇼핑 전문 AI Assistant입니다.
+
+주요 역할:
+1. 사용자가 원하는 상품을 정확히 파악
+2. 다양한 쇼핑몰에서 가격 정보 수집  
+3. 가격 비교 및 최저가 상품 추천
+4. 상품 상세 정보 및 리뷰 요약 제공
+
+사용 가능한 도구:
+- web_search: 웹 검색 (상품 검색, 가격 정보 수집)
+- browser: 웹 페이지 접근 및 정보 추출
+- filesystem: 임시 데이터 저장 및 관리
+
+검색 전략:
+1. 먼저 "{상품명} 최저가" 키워드로 웹 검색
+2. 주요 쇼핑몰별 검색: "네이버쇼핑 {상품명}", "쿠팡 {상품명}", "11번가 {상품명}"
+3. 브라우저로 상세 페이지 접근하여 정확한 가격 정보 수집
+4. 가격 비교 및 최적 상품 선별
+
+응답 형식:
+1. 검색된 상품 요약
+2. 최저가 TOP 3 추천 (가격, 판매자, 배송정보 포함)
+3. 주요 특징 및 리뷰 요약
+4. 구매 시 주의사항
+
+주의사항:
+- 정확한 가격 정보 확인을 위해 반드시 브라우저 도구 활용
+- 할인가와 정가를 명확히 구분
+- 배송비 포함 최종 가격으로 비교
+- 신뢰할 수 있는 판매자 우선 추천
+"""
+```
+
+### B. 간소화된 파일 구조
+
+```
+backend/agents/
+├── __init__.py
+├── shopping_agent.py           # create_react_agent + MCP Adapters
+├── prompts/
+│   ├── __init__.py
+│   └── shopping_prompts.py     # 쇼핑 전용 프롬프트
+└── config/
+    ├── __init__.py
+    └── mcp_config.py          # 기존 MCP 서버 설정
+```
+
+### C. 기존 MCP 서버 활용
+
+#### 1. 웹 검색 MCP 서버
+- **@modelcontextprotocol/server-web-search** 사용
+- Brave Search API 또는 Google Search API 연동
+- 상품 검색 및 가격 정보 수집
+
+#### 2. 브라우저 MCP 서버  
+- **@modelcontextprotocol/server-puppeteer** 사용
+- 쇼핑몰 페이지 직접 접근
+- 정확한 가격 정보 및 상품 상세 정보 추출
+
+#### 3. 파일시스템 MCP 서버
+- **@modelcontextprotocol/server-filesystem** 사용
+- 검색 결과 임시 저장
+- 가격 비교 데이터 관리
+
+### D. 메인 Agent 구현
+
+```python
+# backend/agents/shopping_agent.py
+from typing import Optional, Dict
+from langgraph.prebuilt import create_react_agent
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from .prompts.shopping_prompts import SHOPPING_SYSTEM_PROMPT
+from .config.mcp_config import MCP_SERVER_CONFIG
+
+class ShoppingReactAgent:
+    """최저가 쇼핑 React Agent (기존 MCP 서버 활용)"""
+    
+    def __init__(self, google_api_key: str, brave_api_key: Optional[str] = None):
+        self.model = ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash-exp",
+            temperature=0.1,
+            google_api_key=google_api_key
+        )
+        self.brave_api_key = brave_api_key
+        self.client = None
+        self.agent = None
+        
+    async def initialize(self):
+        """Agent 초기화 및 MCP 도구 로드"""
+        # MCP 서버 설정에 API 키 추가
+        config = MCP_SERVER_CONFIG.copy()
+        if self.brave_api_key:
+            config["web_search"]["env"] = {"BRAVE_API_KEY": self.brave_api_key}
+        
+        # MultiServerMCPClient 초기화
+        self.client = MultiServerMCPClient(config)
+        
+        # MCP 도구 로드
+        tools = await self.client.get_tools()
+        
+        # React Agent 생성
+        self.agent = create_react_agent(
+            model=self.model,
+            tools=tools,
+            prompt=SHOPPING_SYSTEM_PROMPT
+        )
+        
+    async def search_products(self, query: str) -> Dict:
+        """상품 검색 실행"""
+        if not self.agent:
+            await self.initialize()
+            
+        response = await self.agent.ainvoke({
+            "messages": [("user", f"다음 상품의 최저가를 찾아주세요: {query}")]
+        })
+        
+        return {
+            "query": query,
+            "response": response["messages"][-1].content,
+            "full_messages": response["messages"]
+        }
+        
+    async def compare_and_recommend(self, query: str, budget: Optional[int] = None) -> Dict:
+        """가격 비교 및 추천"""
+        if not self.agent:
+            await self.initialize()
+            
+        budget_text = f" (예산: {budget:,}원)" if budget else ""
+        prompt = f"다음 상품을 검색하고 가격을 비교하여 최적의 상품을 추천해주세요: {query}{budget_text}"
+        
+        response = await self.agent.ainvoke({
+            "messages": [("user", prompt)]
+        })
+        
+        return {
+            "query": query,
+            "budget": budget,
+            "recommendation": response["messages"][-1].content,
+            "full_messages": response["messages"]
+        }
+        
+    async def analyze_product_reviews(self, query: str) -> Dict:
+        """상품 리뷰 분석"""
+        if not self.agent:
+            await self.initialize()
+            
+        prompt = f"다음 상품의 리뷰를 분석하여 장단점을 정리해주세요: {query}"
+        
+        response = await self.agent.ainvoke({
+            "messages": [("user", prompt)]
+        })
+        
+        return {
+            "query": query,
+            "analysis": response["messages"][-1].content,
+            "full_messages": response["messages"]
+        }
+        
+    async def cleanup(self):
+        """리소스 정리"""
+        if self.client:
+            # MCP 클라이언트 정리 (필요시)
+            pass
+```
+
+### E. MCP 서버 설정
+
+```python
+# backend/agents/config/mcp_config.py
+import os
+
+MCP_SERVER_CONFIG = {
+    "web_search": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-web-search"],
+        "transport": "stdio",
+        # env는 런타임에 추가됨
+    },
+    "browser": {
+        "command": "npx", 
+        "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+        "transport": "stdio",
+    },
+    "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/shopping_data"],
+        "transport": "stdio",
+    }
+}
+
+# 개발 환경별 설정
+if os.getenv("ENVIRONMENT") == "development":
+    # 개발 환경에서는 로컬 MCP 서버 사용 가능
+    pass
+elif os.getenv("ENVIRONMENT") == "production":
+    # 프로덕션 환경 최적화
+    MCP_SERVER_CONFIG["filesystem"]["args"][-1] = "/var/tmp/shopping_data"
+```
+
+## 🧪 테스트 시나리오
+
+### 1. 단위 테스트
+```python
+# tests/test_backend/test_agents/test_shopping_agent.py
+import pytest
+from unittest.mock import AsyncMock, patch
+from backend.agents.shopping_agent import ShoppingReactAgent
+
+@pytest.mark.asyncio
+async def test_agent_initialization():
+    """Agent 초기화 테스트"""
+    agent = ShoppingReactAgent("test-api-key", "test-brave-key")
+    
+    with patch('langchain_mcp_adapters.client.MultiServerMCPClient') as mock_client:
+        mock_client.return_value.get_tools = AsyncMock(return_value=[])
+        await agent.initialize()
+        assert agent.agent is not None
+
+@pytest.mark.asyncio  
+async def test_product_search():
+    """상품 검색 테스트"""
+    agent = ShoppingReactAgent("test-api-key")
+    
+    with patch.object(agent, 'agent') as mock_agent:
+        mock_agent.ainvoke = AsyncMock(return_value={
+            "messages": [{"content": "테스트 응답"}]
+        })
+        
+        result = await agent.search_products("아이폰 15")
+        assert result["query"] == "아이폰 15"
+        assert "response" in result
+
+@pytest.mark.asyncio
+async def test_mcp_tools_integration():
+    """기존 MCP 서버 연동 테스트"""
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+    
+    # 실제 MCP 서버 없이 테스트
+    with patch('subprocess.Popen'):
+        client = MultiServerMCPClient({
+            "web_search": {
+                "command": "echo",
+                "args": ["test"],
+                "transport": "stdio"
+            }
+        })
+        # 도구 로딩 테스트 로직
+```
+
+### 2. 통합 테스트
+- create_react_agent + 기존 MCP 서버 워크플로우
+- 웹 검색 → 브라우저 접근 → 가격 비교 전체 플로우
+- 실제 쇼핑몰 데이터 검색 테스트
+
+## 📝 구현 체크리스트
+
+### Phase 1: MCP Adapters 기본 구조
+- [ ] langchain-mcp-adapters 설치 및 설정
+- [ ] 기존 MCP 서버 연동 설정
+- [ ] 기본 ShoppingReactAgent 클래스 구현
+- [ ] 시스템 프롬프트 작성
+
+### Phase 2: 기존 MCP 서버 연동
+- [ ] @modelcontextprotocol/server-web-search 연동
+- [ ] @modelcontextprotocol/server-puppeteer 연동  
+- [ ] @modelcontextprotocol/server-filesystem 연동
+- [ ] MCP 도구 테스트
+
+### Phase 3: Agent 통합
+- [ ] create_react_agent + MCP 도구 연동
+- [ ] 전체 워크플로우 테스트
+- [ ] 에러 핸들링 구현
+- [ ] 성능 최적화
+
+### Phase 4: 최적화 및 테스트
+- [ ] E2E 테스트 실행
+- [ ] MCP 서버 안정성 테스트
+- [ ] Pylint 검사 및 수정
+- [ ] 문서화 완료
+
+## 🚀 실행 예시
+
+```python
+# 사용 예시
+agent = ShoppingReactAgent(
+    google_api_key="your-google-api-key",
+    brave_api_key="your-brave-api-key"  # 선택사항
+)
+await agent.initialize()
+
+# 기본 검색
+response = await agent.search_products("아이폰 15 Pro 256GB")
+print(response["response"])
+
+# 예산 기반 추천
+recommendation = await agent.compare_and_recommend("노트북", budget=1000000)
+print(recommendation["recommendation"])
+
+# 리뷰 분석
+review_analysis = await agent.analyze_product_reviews("삼성 갤럭시 S24")
+print(review_analysis["analysis"])
+
+# 리소스 정리
+await agent.cleanup()
+```
+
+
+
+
+

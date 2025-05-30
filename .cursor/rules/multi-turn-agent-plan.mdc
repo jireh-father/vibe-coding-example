@@ -1,0 +1,122 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 멀티턴 에이전트 구현 계획
+
+## 🎯 목표
+기존 단일턴 Shopping Agent를 멀티턴 대화가 가능하도록 개선하되, 최대한 심플하게 구현
+
+## 📋 현재 상태 분석
+
+### 기존 구조
+- [backend/agents/shopping_agent.py](mdc:backend/agents/shopping_agent.py): 단일턴 방식
+- [backend/services/chat_service.py](mdc:backend/services/chat_service.py): 세션별 독립적 처리
+- [frontend/components/chat_interface.py](mdc:frontend/components/chat_interface.py): 메시지 히스토리 UI만 존재
+
+### 문제점
+- 각 요청마다 새로운 Agent 인스턴스 생성
+- 이전 대화 컨텍스트 유지 안됨
+- 연속적인 질문-답변 불가능
+
+## 🔧 구현 계획
+
+### 1단계: LangGraph Memory 활용
+**목표**: LangGraph의 내장 메모리 기능 사용 (가장 심플한 방법)
+
+#### 수정할 파일들:
+- [backend/agents/shopping_agent.py](mdc:backend/agents/shopping_agent.py)
+- [backend/services/chat_service.py](mdc:backend/services/chat_service.py)
+
+#### 구현 방법:
+```python
+# LangGraph의 MemorySaver 사용
+from langgraph.checkpoint.memory import MemorySaver
+
+# Agent 생성 시 메모리 추가
+memory = MemorySaver()
+agent = create_react_agent(
+    model=self.model,
+    tools=tools,
+    checkpointer=memory  # 메모리 추가
+)
+
+# 세션별 thread_id로 대화 컨텍스트 유지
+config = {"configurable": {"thread_id": session_id}}
+response = await agent.ainvoke(messages, config=config)
+```
+
+### 2단계: 세션 관리 개선
+**목표**: 세션별 Agent 인스턴스 재사용
+
+#### ChatService 수정:
+```python
+class ChatService:
+    def __init__(self):
+        self.agents = {}  # 세션별 Agent 캐시
+        
+    def get_or_create_agent(self, session_id: str):
+        if session_id not in self.agents:
+            self.agents[session_id] = ShoppingReactAgent(...)
+        return self.agents[session_id]
+```
+
+### 3단계: 대화 컨텍스트 유지
+**목표**: 이전 대화 내용을 바탕으로 연속 대화 가능
+
+#### 구현 포인트:
+- 세션별 메시지 히스토리 유지
+- 컨텍스트 기반 상품 추천
+- 이전 검색 결과 참조 가능
+
+## 📝 상세 구현 단계
+
+### Step 1: ShoppingReactAgent 멀티턴 지원
+```python
+# backend/agents/shopping_agent.py 수정
+from langgraph.checkpoint.memory import MemorySaver
+
+class ShoppingReactAgent:
+    def __init__(self, google_api_key: str, brave_api_key: str = None):
+        # 기존 코드 유지
+        self.memory = MemorySaver()  # 메모리 추가
+        
+    async def _initialize_agent(self):
+        # 기존 코드에 메모리 추가
+        self.agent = create_react_agent(
+            model=self.model,
+            tools=tools,
+            checkpointer=self.memory
+        )
+    
+    async def search_products(self, query: str, session_id: str):
+        # session_id를 thread_id로 사용
+        config = {"configurable": {"thread_id": session_id}}
+        
+        # 메시지에 이전 컨텍스트 자동 포함됨
+        response = await self.agent.ainvoke({
+            "messages": [("user", query)]
+        }, config=config)
+```
+
+### Step 2: ChatService 세션 관리
+```python
+# backend/services/chat_service.py 수정
+class ChatService:
+    def __init__(self):
+        self.shopping_agent = ShoppingReactAgent(...)  # 단일 인스턴스
+        
+    async def process_message(self, request: ChatRequest):
+        # 세션별 컨텍스트로 처리
+        result = await self.shopping_agent.search_products(
+            request.message, 
+            request.session_id
+        )
+```
+
+### Step 3: 프론트엔드 개선 (선택사항)
+- [frontend/components/chat_interface.py](mdc:frontend/components/chat_interface.py): 기존 UI 유지
+- 연속 대화 가능함을 사용자에게 안내하는 메시지 추가
+
+

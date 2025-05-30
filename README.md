@@ -6,19 +6,33 @@
 
 PriceFinder Agent는 사용자가 원하는 상품의 최저가를 찾아주고, 다양한 쇼핑몰의 가격을 비교하여 최적의 구매 결정을 도와주는 AI Agent입니다.
 
-## 🏗️ 프로젝트 구조
+## ��️ 프로젝트 구조
 
 ```
-vibe_coding_tutorial/
-├── src/
-│   ├── api/              # FastAPI 백엔드 서버
+vibe-coding-example/
+├── backend/             # FastAPI 백엔드 서버
+│   ├── __init__.py
+│   ├── main.py          # 애플리케이션 진입점
+│   ├── routers/         # API 라우터
 │   │   ├── __init__.py
-│   │   └── main.py
-│   └── agent/            # AI Agent 로직
+│   │   └── chat.py      # 채팅 API
+│   ├── schemas/         # Pydantic 스키마
+│   │   ├── __init__.py
+│   │   └── chat.py      # 채팅 스키마
+│   ├── services/        # 비즈니스 로직 서비스
+│   │   ├── __init__.py
+│   │   └── chat_service.py  # 채팅 서비스
+│   └── agents/          # AI Agent 로직
 │       ├── __init__.py
-│       └── core.py
-├── frontend/             # Streamlit 프론트엔드
-│   ├── components/       # UI 컴포넌트
+│       ├── shopping_agent.py    # 쇼핑 에이전트
+│       ├── prompts/     # 프롬프트 템플릿
+│       │   ├── __init__.py
+│       │   └── shopping_prompts.py
+│       └── config/      # 에이전트 설정
+│           ├── __init__.py
+│           └── mcp_config.py
+├── frontend/            # Streamlit 프론트엔드
+│   ├── components/      # UI 컴포넌트
 │   │   ├── __init__.py
 │   │   ├── chat_interface.py
 │   │   └── product_card.py
@@ -38,12 +52,16 @@ vibe_coding_tutorial/
 │   ├── __init__.py
 │   └── app.py           # 메인 Streamlit 앱
 ├── tests/               # 테스트 코드
-│   ├── test_api/
-│   ├── test_agent/
-│   └── test_ui/
+│   ├── test_backend/    # 백엔드 테스트
+│   │   ├── test_routers/
+│   │   ├── test_services/
+│   │   ├── test_schemas/
+│   │   └── test_agents/
+│   └── test_frontend/   # 프론트엔드 테스트
+│       ├── test_components/
+│       └── test_utils/
 ├── .github/workflows/   # GitHub Actions 설정
-│   └── test-and-report.yml # 테스트 및 커버리지 리포트
-├── .venv/               # 가상환경
+├── .env                 # 환경 변수 (gitignore)
 ├── requirements.txt     # 의존성 관리
 ├── pytest.ini          # 테스트 설정
 └── README.md
@@ -54,69 +72,113 @@ vibe_coding_tutorial/
 ### 1. 환경 설정
 
 ```bash
-# 가상환경 활성화
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/Mac
-
 # 의존성 설치
 pip install -r requirements.txt
 ```
 
-### 2. 서버 실행
+### 2. 환경 변수 설정
 
-#### FastAPI 백엔드 서버
+`.env` 파일을 생성하여 다음 변수들을 설정하세요:
+
+```env
+# Google Gemini API
+GOOGLE_API_KEY=your_actual_google_api_key_here
+
+# Brave Search API (선택사항)
+BRAVE_API_KEY=your_actual_brave_api_key_here
+
+# 환경 설정
+ENVIRONMENT=development
+```
+
+### 3. 서버 실행
+
+#### 🔧 FastAPI 백엔드 서버 실행
+
 ```bash
-cd src/api
+# 방법 1: uvicorn 직접 실행 (권장)
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# 방법 2: Python 모듈로 실행
+python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# 방법 3: main.py 직접 실행
+cd backend
 python main.py
 ```
-또는
-```bash
-uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
-```
 
-#### Streamlit 프론트엔드
+백엔드 서버가 실행되면 다음 URL에서 확인할 수 있습니다:
+- API 문서: http://localhost:8000/docs
+- 대체 API 문서: http://localhost:8000/redoc
+- 헬스체크: http://localhost:8000/health
+
+#### 🎨 Streamlit 프론트엔드 실행
+
 ```bash
+# Streamlit 앱 실행
 streamlit run frontend/app.py
+
+# 또는 포트 지정
+streamlit run frontend/app.py --server.port 8501
 ```
 
-### 3. 테스트 실행
+프론트엔드가 실행되면 브라우저에서 http://localhost:8501 로 접속할 수 있습니다.
+
+### 4. 통합 테스트
+
+```bash
+# Chat Service와 Shopping Agent 연결 테스트
+python test_chat_integration.py
+```
+
+### 5. 단위 테스트 실행
 
 ```bash
 # 전체 테스트 실행
 pytest
 
 # 특정 모듈 테스트
-pytest tests/test_api/
-pytest tests/test_agent/
-pytest tests/test_ui/
+pytest tests/test_backend/test_agents/
+pytest tests/test_backend/test_services/
+pytest tests/test_backend/test_routers/
 
 # 커버리지 리포트 생성
-pytest --cov=src --cov=frontend --cov-report=term-missing
+pytest --cov=backend --cov=frontend --cov-report=term-missing
+
+# 상세 테스트 출력
+pytest -v
 ```
 
-## 🔄 CI/CD 통합
+## 🔄 개발 워크플로우
 
-이 프로젝트는 GitHub Actions를 사용하여 지속적 통합(CI)을 구현합니다:
+### 로컬 개발 환경 실행 순서
 
-- 모든 브랜치에 대한 push 이벤트에서 테스트 실행
-- main 브랜치로의 PR에서 테스트 실행
-- 테스트 결과 및 커버리지 리포트를 Discord로 전송
+1. **환경 변수 설정**: `.env` 파일에 API 키 설정
+2. **백엔드 실행**: `uvicorn backend.main:app --reload`
+3. **프론트엔드 실행**: `streamlit run frontend/app.py`
+4. **테스트**: 브라우저에서 http://localhost:8501 접속하여 채팅 테스트
 
-### Discord 웹훅 설정
+### API 테스트
 
-1. Discord 서버에서 채널 설정 > 통합 > 웹후크 생성
-2. GitHub 저장소 설정 > Secrets and variables > Actions > New repository secret
-3. 이름: `DISCORD_WEBHOOK_URL`, 값: Discord 웹후크 URL
-
-자세한 내용은 [테스트 및 커버리지 리포트 워크플로우](.github/workflows/test-and-report.yml)를 참조하세요.
+```bash
+# cURL로 채팅 API 테스트
+curl -X POST "http://localhost:8000/chat" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "message": "아이폰 15 최저가 검색해줘",
+       "session_id": "test-session-123"
+     }'
+```
 
 ## 🛠️ 기술 스택
 
 ### 백엔드
 - **FastAPI**: 고성능 웹 API 프레임워크
-- **LangGraph**: AI Agent 워크플로우 관리
+- **LangGraph**: AI Agent 워크플로우 관리 (create_react_agent)
 - **LangChain**: LLM 통합 프레임워크
-- **MCP Adapters**: Model Context Protocol 통합
+- **langchain-mcp-adapters**: Model Context Protocol 통합
+- **Google Gemini 2.5 Flash**: 대화형 AI 모델
+- **MCP Servers**: 웹 검색, 브라우저 자동화, 파일시스템 접근
 
 ### 프론트엔드
 - **Streamlit**: 빠른 웹 앱 개발 프레임워크
@@ -134,17 +196,18 @@ pytest --cov=src --cov=frontend --cov-report=term-missing
 ### 1. 채팅 인터페이스
 - 자연어로 상품 검색 요청
 - 실시간 대화형 상호작용
-- 검색 기록 관리
+- 스트리밍 응답 (SSE)
 
 ### 2. 상품 검색 및 비교
 - 다중 쇼핑몰 가격 비교
 - 상품 정보 요약
 - 최저가 추천
+- 리뷰 분석
 
-### 3. 사용자 경험
-- 반응형 웹 디자인
-- 빠른 검색 버튼
-- 직관적인 UI/UX
+### 3. AI Agent 기능
+- **상품 검색**: 일반적인 상품 최저가 검색
+- **가격 비교**: 여러 쇼핑몰 가격 비교 및 추천
+- **리뷰 분석**: 상품 리뷰 분석 및 장단점 요약
 
 ## 🧪 개발 원칙
 
@@ -170,14 +233,35 @@ pytest --cov=src --cov=frontend --cov-report=term-missing
 `.env` 파일을 생성하여 다음 변수들을 설정하세요:
 
 ```env
-# API 설정
-API_HOST=localhost
-API_PORT=8000
+# Google Gemini API (필수)
+GOOGLE_API_KEY=your_actual_google_api_key_here
 
-# Google Gemini API
-GOOGLE_API_KEY=your_gemini_api_key_here
+# Brave Search API (선택사항 - 웹 검색 기능 향상)
+BRAVE_API_KEY=your_actual_brave_api_key_here
 
-# 개발 설정
-DEBUG=true
-LOG_LEVEL=INFO
+# 환경 설정
+ENVIRONMENT=development
 ```
+
+## 🚨 문제 해결
+
+### 일반적인 문제들
+
+1. **API 키 오류**: `.env` 파일에 올바른 API 키가 설정되었는지 확인
+2. **포트 충돌**: 8000번(백엔드) 또는 8501번(프론트엔드) 포트가 사용 중인지 확인
+3. **의존성 오류**: `pip install -r requirements.txt`로 모든 패키지 재설치
+
+### 로그 확인
+
+```bash
+# 백엔드 로그 확인 (uvicorn 실행 시 콘솔에 출력)
+# 프론트엔드 로그 확인 (streamlit 실행 시 콘솔에 출력)
+```
+
+## 📞 지원
+
+문제가 발생하면 다음을 확인해주세요:
+1. 환경 변수 설정 확인
+2. 의존성 설치 확인
+3. 포트 사용 상태 확인
+4. 테스트 실행으로 기본 기능 확인

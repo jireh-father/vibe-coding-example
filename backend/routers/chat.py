@@ -11,10 +11,25 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+# ChatService 싱글톤 인스턴스
+_chat_service_instance = None
+
 
 def get_chat_service() -> ChatService:
-    """ChatService 의존성 주입"""
-    return ChatService()
+    """ChatService 의존성 주입 (싱글톤)"""
+    global _chat_service_instance
+    
+    if _chat_service_instance is None:
+        try:
+            _chat_service_instance = ChatService()
+        except ValueError as e:
+            logger.error(f"ChatService 초기화 실패: {str(e)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"서비스 초기화 실패: {str(e)}"
+            )
+    
+    return _chat_service_instance
 
 
 @router.post("")
@@ -38,11 +53,15 @@ async def chat(
         try:
             async for event in chat_service.process_message(request):
                 # StreamingEvent를 JSON으로 직렬화하여 SSE 이벤트로 전송
+                print("yield event from process_message", event)
+                print("yield event from process_message.model_dump_json()", event.model_dump_json())
                 yield {
                     "event": "message",
                     "data": event.model_dump_json()
                 }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             logger.error(f"Error in chat stream: {str(e)}")
             yield {
                 "event": "error",
